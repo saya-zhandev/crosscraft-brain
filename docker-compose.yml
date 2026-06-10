@@ -1,0 +1,21 @@
+# Postgres for crosscraft-brain. Published on 5433 to avoid colliding with other local PGs.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-crosscraft}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-crosscraft}
+      POSTGRES_DB: ${DB_NAME:-crosscraft}
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-crosscraft} -d ${DB_NAME:-crosscraft}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:

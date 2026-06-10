@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.next/
+.turbo/
+.env
+*.log
+.DS_Store
+*.pdf
+.scratch/

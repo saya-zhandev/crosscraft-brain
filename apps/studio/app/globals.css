@@ -1,0 +1,48 @@
+@import "tailwindcss";
+
+/* crosscraft-brain theme — n8n-style layout, our own palette (indigo accent, slate canvas). */
+:root {
+  --bg: #0b0e14;
+  --panel: #11151d;
+  --panel-2: #161b26;
+  --border: #232a37;
+  --text: #e6e9ef;
+  --muted: #8b94a7;
+  --accent: #6366f1;
+  --accent-2: #818cf8;
+  --ok: #22c55e;
+  --warn: #f59e0b;
+  --err: #ef4444;
+  --wait: #38bdf8;
+}
+
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+}
+* { box-sizing: border-box; }
+
+/* React Flow surface tweaks to match the dark theme */
+.react-flow__attribution { display: none; }
+.react-flow__edge-path { stroke: #3a4456; stroke-width: 2; }
+.react-flow__edge.selected .react-flow__edge-path { stroke: var(--accent-2); }
+.react-flow__handle { width: 10px; height: 10px; background: var(--accent); border: 2px solid var(--panel); }
+.react-flow__controls button { background: var(--panel-2); border-color: var(--border); color: var(--text); fill: var(--text); }
+
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 12px; border-radius: 8px; font-size: 13px; font-weight: 600;
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--border); cursor: pointer;
+}
+.btn:hover { border-color: #2f3848; }
+.btn-accent { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn-accent:hover { background: var(--accent-2); }
+.input, .textarea, select.input {
+  width: 100%; padding: 8px 10px; border-radius: 8px; font-size: 13px;
+  background: var(--bg); color: var(--text); border: 1px solid var(--border); font-family: inherit;
+}
+.textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+label.fld { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin: 12px 0 4px; }
