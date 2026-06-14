@@ -1,4 +1,9 @@
-# Postgres for crosscraft-brain. Published on 5433 to avoid colliding with other local PGs.
+# crosscraft-brain — one-command stack: Postgres + migrations + the studio app.
+#
+#   docker compose up --build     # boot everything; studio on http://localhost:3000
+#
+# Secrets/AI config are read from the repo-root .env via ${VAR} interpolation (Compose loads
+# it automatically). Everything has a sensible default, so it also boots on a fresh clone.
 services:
   postgres:
     image: postgres:16-alpine
@@ -8,14 +13,41 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD:-crosscraft}
       POSTGRES_DB: ${DB_NAME:-crosscraft}
     ports:
-      - "5433:5432"
+      - "5433:5432" # published for host tools; services talk to postgres:5432 internally
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # Core + farm schema, applied automatically on first init of an empty data volume.
+      # (Idempotent SQL; to re-apply after editing, `pnpm docker:reset` recreates the volume.)
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./db/farm.sql:/docker-entrypoint-initdb.d/02-farm.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-crosscraft} -d ${DB_NAME:-crosscraft}"]
       interval: 5s
       timeout: 5s
       retries: 10
+
+  studio:
+    build:
+      context: .
+      target: runner
+    environment:
+      DATABASE_URL: postgres://${DB_USER:-crosscraft}:${DB_PASSWORD:-crosscraft}@postgres:5432/${DB_NAME:-crosscraft}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
+      CREDENTIALS_SECRET: ${CREDENTIALS_SECRET:-0000000000000000000000000000000000000000000000000000000000000000}
+      # AI provider (optional). Set these in .env to enable Copilot + AI nodes.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      AI_BASE_URL: ${AI_BASE_URL:-}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_MODEL_FAST: ${AI_MODEL_FAST:-}
+      AI_MODEL_SMART: ${AI_MODEL_SMART:-}
+      HOSTNAME: 0.0.0.0
+      PORT: "3000"
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   pgdata:

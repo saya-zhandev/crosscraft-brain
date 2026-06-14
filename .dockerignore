@@ -1,0 +1,12 @@
+# Keep the build context small and never leak local secrets/artifacts into the image.
+**/node_modules
+**/.next
+**/dist
+**/.turbo
+.git
+.env
+*.log
+.DS_Store
+**/*.tsbuildinfo
+Dockerfile
+.dockerignore

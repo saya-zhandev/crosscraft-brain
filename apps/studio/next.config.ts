@@ -9,8 +9,18 @@ const here = dirname(fileURLToPath(import.meta.url));
 loadEnv({ path: resolve(here, '../../.env') });
 
 const nextConfig: NextConfig = {
+  // Self-contained server bundle for Docker (.next/standalone with traced deps).
+  output: 'standalone',
+  // The monorepo root is the workspace root for output-file tracing.
+  outputFileTracingRoot: resolve(here, '../..'),
   // Consume workspace TS packages directly (no per-package build step).
-  transpilePackages: ['@crosscraft/schema', '@crosscraft/engine', '@crosscraft/nodes-core'],
+  transpilePackages: [
+    '@crosscraft/schema',
+    '@crosscraft/engine',
+    '@crosscraft/nodes-core',
+    '@crosscraft/nodes-ai',
+    '@crosscraft/nodes-farm',
+  ],
   serverExternalPackages: ['pg'],
 };
 

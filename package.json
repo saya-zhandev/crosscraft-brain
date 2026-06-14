@@ -9,8 +9,11 @@
     "dev": "turbo run dev",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
-    "db:up": "docker compose up -d",
-    "db:migrate": "tsx db/migrate.ts"
+    "db:up": "docker compose up -d postgres",
+    "db:migrate": "tsx db/migrate.ts",
+    "docker:up": "docker compose up --build",
+    "docker:down": "docker compose down",
+    "docker:reset": "docker compose down -v"
   },
   "devDependencies": {
     "tsx": "^4.19.2",

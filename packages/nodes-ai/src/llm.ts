@@ -1,17 +1,28 @@
-/** Provider abstraction for AI nodes + copilot. Anthropic Claude by default. */
+/**
+ * Provider abstraction for AI nodes + copilot. Anthropic Claude by default, but any
+ * Anthropic-Messages-compatible endpoint works via env (e.g. DeepSeek's `/anthropic`):
+ *   AI_BASE_URL   override base URL (else ANTHROPIC_BASE_URL, else Anthropic default)
+ *   AI_API_KEY    override key       (else ANTHROPIC_API_KEY)
+ *   AI_MODEL_FAST / AI_MODEL_SMART   override the model ids below
+ */
 import Anthropic from '@anthropic-ai/sdk';
 
+// `||` (not `??`) so an empty env string — how Docker Compose passes an unset var — falls back.
 export const MODELS = {
-  fast: 'claude-haiku-4-5', // cheap in-node AI
-  smart: 'claude-sonnet-4-6', // copilot / heavier reasoning
+  fast: process.env.AI_MODEL_FAST || 'claude-haiku-4-5', // cheap in-node AI
+  smart: process.env.AI_MODEL_SMART || 'claude-sonnet-4-6', // copilot / heavier reasoning
 } as const;
 
 let client: Anthropic | null = null;
 function anthropic(): Anthropic {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    throw new Error('ANTHROPIC_API_KEY is not set — AI features are disabled.');
+  const apiKey = process.env.AI_API_KEY || process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    throw new Error('No AI key set (AI_API_KEY or ANTHROPIC_API_KEY) — AI features are disabled.');
   }
-  if (!client) client = new Anthropic();
+  if (!client) {
+    const baseURL = process.env.AI_BASE_URL || process.env.ANTHROPIC_BASE_URL;
+    client = new Anthropic({ apiKey, ...(baseURL ? { baseURL } : {}) });
+  }
   return client;
 }
 

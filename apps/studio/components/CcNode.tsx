@@ -1,23 +1,11 @@
 'use client';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import * as Icons from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import type { NodeDescriptor } from '@crosscraft/engine';
 import type { StepStatus } from '@crosscraft/schema';
-
-const GROUP_COLOR: Record<string, string> = {
-  trigger: '#22c55e',
-  transform: '#6366f1',
-  flow: '#f59e0b',
-  integration: '#38bdf8',
-  ai: '#a855f7',
-};
-
-const STATUS_BORDER: Record<string, string> = {
-  running: '#f59e0b',
-  success: '#22c55e',
-  error: '#ef4444',
-  waiting: '#38bdf8',
-};
+import { cn } from '@/lib/utils';
+import { groupVar, statusVar } from '@/lib/ui';
 
 export interface CcNodeData {
   label: string;
@@ -30,47 +18,51 @@ export interface CcNodeData {
 export function CcNode({ data, selected }: NodeProps) {
   const d = data as CcNodeData;
   const desc = d.descriptor;
-  const accent = GROUP_COLOR[desc.group] ?? '#6366f1';
-  const border = d.status ? STATUS_BORDER[d.status] : selected ? '#818cf8' : 'var(--border)';
+  const accent = groupVar(desc.group);
   const Icon = (desc.icon && (Icons as Record<string, unknown>)[desc.icon]) as
     | React.ComponentType<{ size?: number; color?: string }>
     | undefined;
 
+  // Border: live run status wins, else selection, else hairline. Token-driven.
+  const borderColor = d.status
+    ? statusVar(d.status)
+    : selected
+      ? 'var(--accent-2)'
+      : 'var(--border)';
+
   return (
     <div
-      style={{
-        minWidth: 180,
-        background: 'var(--panel-2)',
-        border: `2px solid ${border}`,
-        borderRadius: 12,
-        boxShadow: selected ? '0 0 0 3px rgba(129,140,248,.25)' : 'none',
-      }}
+      className={cn(
+        'min-w-[180px] rounded-xl bg-panel-2 transition-shadow',
+        selected && 'shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent-2)_25%,transparent)]',
+      )}
+      style={{ border: `2px solid ${borderColor}` }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px' }}>
-        <span style={{ width: 26, height: 26, borderRadius: 7, background: accent + '22', display: 'grid', placeItems: 'center' }}>
+      <div className="flex items-center gap-2.5 px-3 py-2.5">
+        <span
+          className="grid size-7 shrink-0 place-items-center rounded-lg"
+          style={{ background: `color-mix(in srgb, ${accent} 16%, transparent)` }}
+        >
           {Icon ? <Icon size={15} color={accent} /> : <span style={{ color: accent }}>●</span>}
         </span>
-        <div style={{ overflow: 'hidden' }}>
-          <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap' }}>{d.label}</div>
-          <div style={{ fontSize: 10, color: 'var(--muted)' }}>{desc.label}</div>
+        <div className="min-w-0">
+          <div className="truncate text-[13px] font-semibold leading-tight">{d.label}</div>
+          <div className="truncate text-[10px] text-muted">{desc.label}</div>
         </div>
+        {d.status === 'running' && <Loader2 className="ml-auto size-3.5 animate-spin text-warn" />}
+        {d.status === 'waiting' && <span className="ml-auto size-2 rounded-full bg-wait" />}
       </div>
 
-      {/* input handle */}
+      {/* input handles */}
       {desc.inputs.map((p) => (
-        <Handle key={`in-${p.id}`} id={p.id} type="target" position={Position.Left} style={{ top: 24 }} />
+        <Handle key={`in-${p.id}`} id={p.id} type="target" position={Position.Left} style={{ top: 26 }} />
       ))}
-      {/* output handles, stacked when multiple (e.g. if -> true/false) */}
+
+      {/* output handles, stacked + labelled when multiple (e.g. if -> true/false) */}
       {desc.outputs.map((p, i) => (
-        <Handle
-          key={`out-${p.id}`}
-          id={p.id}
-          type="source"
-          position={Position.Right}
-          style={{ top: 24 + i * 20 }}
-        >
+        <Handle key={`out-${p.id}`} id={p.id} type="source" position={Position.Right} style={{ top: 26 + i * 20 }}>
           {desc.outputs.length > 1 && (
-            <span style={{ position: 'absolute', right: 12, top: -8, fontSize: 9, color: 'var(--muted)' }}>
+            <span className="pointer-events-none absolute -top-2 right-3 text-[9px] text-muted">
               {p.label ?? p.id}
             </span>
           )}

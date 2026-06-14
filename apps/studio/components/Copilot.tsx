@@ -1,7 +1,11 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Sparkles, X, Send } from 'lucide-react';
 import type { NodeDescriptor } from '@crosscraft/engine';
 import type { GraphOp, Workflow } from '@crosscraft/schema';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 interface Props {
   workflow: () => Workflow;
@@ -17,10 +21,18 @@ interface Msg {
 
 export function Copilot({ workflow, onApply, onClose }: Props) {
   const [msgs, setMsgs] = useState<Msg[]>([
-    { role: 'assistant', text: 'Describe a workflow and I will build it on the canvas. e.g. "When a webhook arrives, summarize the text with AI, then branch if urgent."' },
+    {
+      role: 'assistant',
+      text: 'Describe a workflow and I’ll build it on the canvas. e.g. “When a webhook arrives, summarize the text with AI, then branch if urgent.”',
+    },
   ]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+  }, [msgs, busy]);
 
   const send = async () => {
     if (!input.trim() || busy) return;
@@ -52,46 +64,58 @@ export function Copilot({ workflow, onApply, onClose }: Props) {
   };
 
   return (
-    <div style={{ width: 340, borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 12, borderBottom: '1px solid var(--border)' }}>
-        <span style={{ fontWeight: 600, fontSize: 14 }}>✨ Copilot</span>
-        <button className="btn" style={{ padding: '4px 8px' }} onClick={onClose}>
-          ✕
-        </button>
+    <div className="flex h-full flex-col">
+      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+        <span className="flex items-center gap-2 text-sm font-semibold">
+          <Sparkles className="size-4 text-accent-2" />
+          Copilot
+        </span>
+        <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close copilot">
+          <X />
+        </Button>
       </div>
-      <div style={{ flex: 1, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+
+      <div ref={scrollRef} className="flex flex-1 flex-col gap-2.5 overflow-y-auto p-4">
         {msgs.map((m, i) => (
           <div
             key={i}
-            style={{
-              alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
-              maxWidth: '90%',
-              background: m.role === 'user' ? 'var(--accent)' : 'var(--panel-2)',
-              color: m.role === 'user' ? '#fff' : 'var(--text)',
-              border: m.role === 'user' ? 'none' : '1px solid var(--border)',
-              borderRadius: 10,
-              padding: '8px 11px',
-              fontSize: 13,
-              whiteSpace: 'pre-wrap',
-            }}
+            className={cn(
+              'max-w-[90%] whitespace-pre-wrap rounded-xl px-3 py-2 text-[13px] leading-relaxed',
+              m.role === 'user'
+                ? 'self-end bg-accent text-accent-fg'
+                : 'self-start border border-border bg-panel-2 text-text',
+            )}
           >
             {m.text}
           </div>
         ))}
-        {busy && <div style={{ color: 'var(--muted)', fontSize: 13 }}>thinking…</div>}
+        {busy && (
+          <div className="flex items-center gap-1.5 self-start rounded-xl border border-border bg-panel-2 px-3 py-2.5">
+            <Dot /> <Dot delay={150} /> <Dot delay={300} />
+          </div>
+        )}
       </div>
-      <div style={{ padding: 12, borderTop: '1px solid var(--border)', display: 'flex', gap: 8 }}>
-        <input
-          className="input"
+
+      <div className="flex items-center gap-2 border-t border-border p-3">
+        <Input
           placeholder="Describe a workflow…"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && send()}
         />
-        <button className="btn btn-accent" onClick={send} disabled={busy}>
-          Send
-        </button>
+        <Button size="icon" onClick={send} disabled={busy || !input.trim()} aria-label="Send">
+          <Send />
+        </Button>
       </div>
     </div>
+  );
+}
+
+function Dot({ delay = 0 }: { delay?: number }) {
+  return (
+    <span
+      className="size-1.5 animate-bounce rounded-full bg-muted"
+      style={{ animationDelay: `${delay}ms` }}
+    />
   );
 }

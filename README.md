@@ -43,16 +43,34 @@ rehydrates and continues, injecting the payload as the resumed node's output. Th
 "one lot = one long-running execution that pauses at each stage" works — generalized from
 the validated `farmersback` webhook-wait pattern, now fully owned.
 
-## Quick start
+## Quick start — one command (Docker)
+
+Boots Postgres, applies migrations, and serves the studio. Nothing else to install.
+
+```bash
+cp .env.example .env     # optional: set CREDENTIALS_SECRET + AI keys (sensible defaults otherwise)
+pnpm docker:up           # = docker compose up --build  → http://localhost:3000
+```
+
+The stack has two services: **postgres** → **studio** (the Next.js app, started once Postgres is
+healthy). Postgres applies the core + farm schema itself on first init of an empty data volume
+(`db/*.sql` mounted into its init dir). Tear down with `pnpm docker:down` (keep data) or
+`pnpm docker:reset` (drop the DB volume, so the schema re-applies on the next `up`).
+
+## Quick start — local dev (hot reload)
 
 ```bash
 corepack enable && pnpm install
-cp .env.example .env                 # set CREDENTIALS_SECRET; ANTHROPIC_API_KEY for AI
-pnpm db:up                           # Postgres on :5433 (docker)
+cp .env.example .env                 # set CREDENTIALS_SECRET; AI keys for Copilot/AI nodes
+pnpm db:up                           # just Postgres on :5433 (docker)
 node --env-file=.env --import tsx db/migrate.ts            # core tables
 node --env-file=.env --import tsx db/migrate.ts db/farm.sql # + farm vertical tables
 pnpm --filter @crosscraft/studio dev # studio on http://localhost:3000
 ```
+
+> **AI provider:** set `ANTHROPIC_API_KEY` for Claude, or point at any Anthropic-Messages-
+> compatible endpoint via `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL_FAST` / `AI_MODEL_SMART`
+> (e.g. DeepSeek's `https://api.deepseek.com/anthropic` with `deepseek-chat`).
 
 Open the studio, create a workflow, drag nodes from the palette, connect, configure in the
 inspector, and hit **Run** — nodes light up live (Transparent Monitoring). The **Runs** page

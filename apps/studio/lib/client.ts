@@ -31,7 +31,28 @@ export const api = {
     }).then((r) => j<{ executionId: string; status: string }>(r)),
   listExecutions: (workflowId: string) =>
     fetch(`/api/executions?workflowId=${workflowId}`).then((r) => j<ExecutionRow[]>(r)),
+  resume: (executionId: string, body: unknown = {}) =>
+    fetch(`/api/resume/${executionId}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((r) => j<{ executionId: string; status?: string }>(r)),
+  listCredentials: () => fetch('/api/credentials').then((r) => j<CredentialRow[]>(r)),
+  createCredential: (input: { type: string; name: string; data: Record<string, unknown> }) =>
+    fetch('/api/credentials', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    }).then((r) => j<CredentialRow>(r)),
+  deleteCredential: (id: string) =>
+    fetch(`/api/credentials/${id}`, { method: 'DELETE' }).then((r) => j<{ ok: true }>(r)),
 };
+
+export interface CredentialRow {
+  id: string;
+  type: string;
+  name: string;
+}
 
 export interface ExecutionRow {
   id: string;
