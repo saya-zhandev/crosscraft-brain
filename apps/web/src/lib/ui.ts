@@ -1,7 +1,7 @@
 import type { BadgeProps } from '@/components/ui/badge';
 
 /**
- * Node-group + run-status color semantics (DESIGN.md §3). These are meaningful, not
+ * Node-group + run-status color semantics. These are meaningful, not
  * decorative. Colors live in the token layer (globals.css); we reference the CSS vars by
  * name so a fork rebrands by overriding the var, never by editing a component.
  */
