@@ -48,15 +48,15 @@ load-bearing primitive for durable, multi-step automations.
 
 ## Quick start — one command (Docker)
 
-Boots Postgres, applies migrations, and serves the studio. Nothing else to install.
+Boots Postgres and serves the app from a single Go binary. Nothing else to install.
 
 ```bash
 cp .env.example .env     # optional: set CREDENTIALS_SECRET + AI keys (sensible defaults otherwise)
-pnpm docker:up           # = docker compose up --build  → http://localhost:3000
+pnpm docker:up           # = docker compose up --build  → http://localhost:8080
 ```
 
-The stack has two services: **postgres** → **studio** (the Next.js app, started once Postgres is
-healthy). Postgres applies the core schema itself on first init of an empty data volume
+The stack has two services: **postgres** → **server** (the single Go binary serving the API +
+embedded SPA, started once Postgres is healthy). Postgres applies the core schema itself on first init of an empty data volume
 (`db/*.sql` mounted into its init dir). Tear down with `pnpm docker:down` (keep data) or
 `pnpm docker:reset` (drop the DB volume, so the schema re-applies on the next `up`).
 
@@ -66,27 +66,28 @@ healthy). Postgres applies the core schema itself on first init of an empty data
 corepack enable && pnpm install
 cp .env.example .env                 # set CREDENTIALS_SECRET; AI keys for Copilot/AI nodes
 pnpm db:up                           # just Postgres on :5433 (docker)
-node --env-file=.env --import tsx db/migrate.ts            # core tables
-pnpm --filter @crosscraft/studio dev # studio on http://localhost:3000
+node --env-file=.env --import tsx db/migrate.ts   # apply core schema
+go -C server run ./cmd/crosscraft    # Go API + embedded UI on :8080
+pnpm --filter @crosscraft/web dev    # Vite dev on :3000 (proxies /api -> :8080)
 ```
 
 > **AI provider:** set `ANTHROPIC_API_KEY` for Claude, or point at any Anthropic-Messages-
 > compatible endpoint via `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL_FAST` / `AI_MODEL_SMART`
 > (e.g. DeepSeek's `https://api.deepseek.com/anthropic` with `deepseek-chat`).
 
-Open the studio, create a workflow, drag nodes from the palette, connect, configure in the
-inspector, and hit **Run** — nodes light up live (Transparent Monitoring). The **Runs** page
-shows every node's input/output for any past execution.
+Open the app (http://localhost:3000 in dev, :8080 from the binary), create a workflow, drag
+nodes from the palette, connect, configure in the inspector, and hit **Run** — nodes light up
+live (Transparent Monitoring). The **Runs** page shows every node's input/output for any run.
 
 ## Verify (no UI needed)
 
 ```bash
-# Engine: run -> suspend -> resume -> success, with per-step I/O persisted
-node --env-file=.env --import tsx scripts/engine-smoke.ts
+# Engine unit tests: run -> suspend -> resume -> success, goja {{ }} expressions, etc.
+go -C server test ./...
 ```
 
-The studio HTTP surface mirrors this: `POST /api/webhook/{path}` to start, `POST
-/api/resume/{id}` to advance, `GET /api/executions/{id}` to inspect.
+The HTTP surface: `POST /api/webhook/{path}` to start, `POST /api/resume/{id}` to advance,
+`GET /api/executions/{id}` to inspect.
 
 ## Stack
 
