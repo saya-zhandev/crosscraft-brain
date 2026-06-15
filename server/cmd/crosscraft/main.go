@@ -20,6 +20,7 @@ import (
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/nodes/core"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/registry"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/store"
+	"github.com/CrossCraftAI/crosscraft-brain/server/web"
 )
 
 func main() {
@@ -46,7 +47,7 @@ func main() {
 	reg := registry.New().Register(core.Nodes...).Register(ai.Nodes(llmClient)...)
 	st := store.New(pool, cipher)
 	eng := engine.New(reg, st)
-	handler := api.NewRouter(reg, st, eng, llmClient)
+	handler := api.NewRouter(reg, st, eng, llmClient, web.FS())
 
 	srv := &http.Server{
 		Addr:              ":" + port,

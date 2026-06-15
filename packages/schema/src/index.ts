@@ -124,6 +124,9 @@ export interface NodeDefinition {
   execute(ctx: ExecContext): Promise<NodeResult>;
 }
 
+/** Serializable node metadata (a NodeDefinition without execute) — sent to the canvas. */
+export type NodeDescriptor = Omit<NodeDefinition, 'execute'>;
+
 // ---------------------------------------------------------------------------
 // Execution / monitoring records (persisted; power Transparent Monitoring)
 // ---------------------------------------------------------------------------

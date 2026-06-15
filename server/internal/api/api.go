@@ -5,7 +5,9 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net/http"
+	"path"
 	"strings"
 	"time"
 
@@ -29,7 +31,7 @@ type Server struct {
 }
 
 // NewRouter wires the /api routes.
-func NewRouter(reg *registry.Registry, st *store.Store, eng *engine.Engine, llmc *llm.Client) http.Handler {
+func NewRouter(reg *registry.Registry, st *store.Store, eng *engine.Engine, llmc *llm.Client, staticFS fs.FS) http.Handler {
 	s := &Server{reg: reg, store: st, eng: eng, llm: llmc}
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
@@ -57,7 +59,45 @@ func NewRouter(reg *registry.Registry, st *store.Store, eng *engine.Engine, llmc
 
 		r.Post("/copilot", s.copilot)
 	})
+
+	// Serve the embedded SPA for everything else, with index.html fallback so
+	// client-side routes (e.g. /editor/{id}) resolve.
+	if staticFS != nil {
+		r.NotFound(spaHandler(staticFS))
+	}
 	return r
+}
+
+// spaHandler serves the embedded SPA: real files are served directly; any other
+// GET path falls back to index.html so client-side routes resolve.
+func spaHandler(dist fs.FS) http.HandlerFunc {
+	fileServer := http.FileServer(http.FS(dist))
+	serveIndex := func(w http.ResponseWriter) {
+		b, err := fs.ReadFile(dist, "index.html")
+		if err != nil {
+			http.Error(w, "frontend not built", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(b)
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.NotFound(w, r)
+			return
+		}
+		p := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+		if p == "" || p == "." {
+			serveIndex(w)
+			return
+		}
+		if f, err := dist.Open(p); err == nil {
+			_ = f.Close()
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+		serveIndex(w) // unknown path → client-side route
+	}
 }
 
 // ---- node catalog ----------------------------------------------------------

@@ -1,5 +1,6 @@
 node_modules/
-dist/
+packages/*/dist/
+apps/*/dist/
 .next/
 .turbo/
 .env
@@ -7,3 +8,8 @@ dist/
 .DS_Store
 *.pdf
 .scratch/
+
+# Embedded SPA build output: ignore the built assets but keep the placeholder so
+# `go:embed dist` always compiles, even before a frontend build has run.
+server/web/dist/*
+!server/web/dist/.gitkeep

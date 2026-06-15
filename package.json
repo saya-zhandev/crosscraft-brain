@@ -22,9 +22,7 @@
     "@types/node": "^22.10.2",
     "pg": "^8.13.1",
     "@types/pg": "^8.11.10",
-    "@crosscraft/schema": "workspace:*",
-    "@crosscraft/engine": "workspace:*",
-    "@crosscraft/nodes-core": "workspace:*"
+    "@crosscraft/schema": "workspace:*"
   },
   "packageManager": "pnpm@9.15.9",
   "engines": { "node": ">=20" }
