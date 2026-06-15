@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/engine"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/id"
+	"github.com/CrossCraftAI/crosscraft-brain/server/internal/llm"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/registry"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/schema"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/store"
@@ -23,11 +25,12 @@ type Server struct {
 	reg   *registry.Registry
 	store *store.Store
 	eng   *engine.Engine
+	llm   *llm.Client
 }
 
 // NewRouter wires the /api routes.
-func NewRouter(reg *registry.Registry, st *store.Store, eng *engine.Engine) http.Handler {
-	s := &Server{reg: reg, store: st, eng: eng}
+func NewRouter(reg *registry.Registry, st *store.Store, eng *engine.Engine, llmc *llm.Client) http.Handler {
+	s := &Server{reg: reg, store: st, eng: eng, llm: llmc}
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
 	r.Use(cors)
@@ -313,12 +316,150 @@ func (s *Server) deleteCredential(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-// copilot is a Phase 1 feature; stubbed so the UI degrades gracefully.
+// copilot turns a natural-language request + the current graph into GraphOps the
+// canvas applies. Port of apps/studio/app/api/copilot/route.ts.
 func (s *Server) copilot(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ops":     []any{},
-		"message": "Copilot is not implemented in the Go backend yet.",
+	var body struct {
+		Message  string          `json:"message"`
+		Workflow schema.Workflow `json:"workflow"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+
+	type catItem struct {
+		Type    string   `json:"type"`
+		Label   string   `json:"label"`
+		Group   string   `json:"group"`
+		Outputs []string `json:"outputs"`
+		Params  []string `json:"params"`
+	}
+	catalog := []catItem{}
+	for _, d := range s.reg.Descriptors() {
+		outs := []string{}
+		for _, o := range d.Outputs {
+			outs = append(outs, o.ID)
+		}
+		ps := []string{}
+		for _, p := range d.Params {
+			ps = append(ps, p.Name)
+		}
+		catalog = append(catalog, catItem{d.Type, d.Label, d.Group, outs, ps})
+	}
+
+	system := strings.Join([]string{
+		`You build node-based automation workflows for the "crosscraft" engine.`,
+		"Only use node `type` values from the provided catalog. Wire nodes with edges.",
+		`Triggers have no inputs and start the flow. The "if" node has outputs "true" and "false".`,
+		"Return the nodes and edges to ADD to the current graph. Reuse existing node ids when connecting to them.",
+		"Give each new node a short unique id and sensible params (param values may use {{ $json.field }} expressions).",
+	}, " ")
+
+	promptBytes, _ := json.Marshal(map[string]any{
+		"request":      body.Message,
+		"catalog":      catalog,
+		"currentGraph": map[string]any{"nodes": body.Workflow.Nodes, "edges": body.Workflow.Edges},
 	})
+
+	buildSchema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"message": map[string]any{"type": "string", "description": "Short explanation for the user."},
+			"nodes": map[string]any{
+				"type": "array",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"id":     map[string]any{"type": "string"},
+						"type":   map[string]any{"type": "string"},
+						"params": map[string]any{"type": "object", "additionalProperties": true},
+						"x":      map[string]any{"type": "number"},
+						"y":      map[string]any{"type": "number"},
+					},
+					"required": []string{"id", "type"},
+				},
+			},
+			"edges": map[string]any{
+				"type": "array",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"source":       map[string]any{"type": "string"},
+						"target":       map[string]any{"type": "string"},
+						"sourceHandle": map[string]any{"type": "string"},
+						"targetHandle": map[string]any{"type": "string"},
+					},
+					"required": []string{"source", "target"},
+				},
+			},
+		},
+		"required": []string{"message", "nodes", "edges"},
+	}
+
+	res, err := s.llm.Structured(r.Context(), llm.StructuredOpts{
+		Model:    s.llm.Models.Smart,
+		System:   system,
+		Prompt:   string(promptBytes),
+		ToolName: "build_workflow",
+		Schema:   buildSchema,
+	})
+	if err != nil {
+		// Match TS: surface the error with 200 so the UI shows it inline.
+		writeJSON(w, http.StatusOK, map[string]any{"error": err.Error()})
+		return
+	}
+
+	ops := []map[string]any{}
+	if nodes, ok := res["nodes"].([]any); ok {
+		for i, raw := range nodes {
+			n, _ := raw.(map[string]any)
+			if n == nil {
+				continue
+			}
+			ntype, _ := n["type"].(string)
+			if !s.reg.Has(ntype) {
+				continue // ignore hallucinated node types
+			}
+			nid, _ := n["id"].(string)
+			params, _ := n["params"].(map[string]any)
+			if params == nil {
+				params = map[string]any{}
+			}
+			ops = append(ops, map[string]any{
+				"op": "addNode",
+				"node": map[string]any{
+					"id":       nid,
+					"type":     ntype,
+					"params":   params,
+					"position": map[string]any{"x": asFloat(n["x"], float64(i*240)), "y": asFloat(n["y"], 80)},
+				},
+			})
+		}
+	}
+	if edges, ok := res["edges"].([]any); ok {
+		for _, raw := range edges {
+			e, _ := raw.(map[string]any)
+			if e == nil {
+				continue
+			}
+			src, _ := e["source"].(string)
+			tgt, _ := e["target"].(string)
+			ops = append(ops, map[string]any{
+				"op": "connect",
+				"edge": map[string]any{
+					"id":           id.New(),
+					"source":       src,
+					"target":       tgt,
+					"sourceHandle": strOr(e["sourceHandle"], "main"),
+					"targetHandle": strOr(e["targetHandle"], "main"),
+				},
+			})
+		}
+	}
+
+	msg, _ := res["message"].(string)
+	writeJSON(w, http.StatusOK, map[string]any{"ops": ops, "message": msg})
 }
 
 // ---- helpers ---------------------------------------------------------------
@@ -345,6 +486,25 @@ func bodyObject(r *http.Request) map[string]any {
 		m = map[string]any{}
 	}
 	return m
+}
+
+func asFloat(v any, def float64) float64 {
+	switch t := v.(type) {
+	case float64:
+		return t
+	case int:
+		return float64(t)
+	case int64:
+		return float64(t)
+	}
+	return def
+}
+
+func strOr(v any, def string) string {
+	if s, ok := v.(string); ok && s != "" {
+		return s
+	}
+	return def
 }
 
 func cors(next http.Handler) http.Handler {

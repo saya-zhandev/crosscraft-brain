@@ -8,7 +8,7 @@
 
 The studio is the front end of a **forkable workflow-automation platform**. It clones the
 *ergonomics* of n8n (palette ▸ canvas ▸ inspector, drag-to-build, run-and-watch) but is our
-own React app with our own brand and our own engine. Verticals (e.g. FarmersFront) **fork**
+own React app with our own brand and our own engine. Verticals **fork**
 the platform and add node packs + branding — so the UI must stay generic and theme-driven.
 
 Audience: technical-ish operators building and monitoring automations. Density and clarity

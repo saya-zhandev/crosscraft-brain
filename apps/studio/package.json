@@ -14,7 +14,6 @@
     "@crosscraft/engine": "workspace:*",
     "@crosscraft/nodes-ai": "workspace:*",
     "@crosscraft/nodes-core": "workspace:*",
-    "@crosscraft/nodes-farm": "workspace:*",
     "@crosscraft/schema": "workspace:*",
     "@radix-ui/react-collapsible": "^1.1.13",
     "@radix-ui/react-dialog": "^1.1.16",

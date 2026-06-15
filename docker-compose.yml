@@ -16,10 +16,9 @@ services:
       - "5433:5432" # published for host tools; services talk to postgres:5432 internally
     volumes:
       - pgdata:/var/lib/postgresql/data
-      # Core + farm schema, applied automatically on first init of an empty data volume.
+      # Core schema, applied automatically on first init of an empty data volume.
       # (Idempotent SQL; to re-apply after editing, `pnpm docker:reset` recreates the volume.)
       - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
-      - ./db/farm.sql:/docker-entrypoint-initdb.d/02-farm.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-crosscraft} -d ${DB_NAME:-crosscraft}"]
       interval: 5s

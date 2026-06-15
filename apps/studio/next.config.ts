@@ -19,7 +19,6 @@ const nextConfig: NextConfig = {
     '@crosscraft/engine',
     '@crosscraft/nodes-core',
     '@crosscraft/nodes-ai',
-    '@crosscraft/nodes-farm',
   ],
   serverExternalPackages: ['pg'],
   // Dev: proxy all /api/* calls to the Go backend (single source of truth for the

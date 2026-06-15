@@ -50,9 +50,6 @@ importers:
       '@crosscraft/nodes-core':
         specifier: workspace:*
         version: link:../../packages/nodes-core
-      '@crosscraft/nodes-farm':
-        specifier: workspace:*
-        version: link:../../packages/nodes-farm
       '@crosscraft/schema':
         specifier: workspace:*
         version: link:../../packages/schema
@@ -178,19 +175,6 @@ importers:
         version: 5.9.3
 
   packages/nodes-core:
-    dependencies:
-      '@crosscraft/engine':
-        specifier: workspace:*
-        version: link:../engine
-      '@crosscraft/schema':
-        specifier: workspace:*
-        version: link:../schema
-    devDependencies:
-      typescript:
-        specifier: ^5.7.2
-        version: 5.9.3
-
-  packages/nodes-farm:
     dependencies:
       '@crosscraft/engine':
         specifier: workspace:*

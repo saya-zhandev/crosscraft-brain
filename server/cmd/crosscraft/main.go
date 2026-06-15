@@ -15,6 +15,8 @@ import (
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/api"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/crypto"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/engine"
+	"github.com/CrossCraftAI/crosscraft-brain/server/internal/llm"
+	"github.com/CrossCraftAI/crosscraft-brain/server/internal/nodes/ai"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/nodes/core"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/registry"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/store"
@@ -40,10 +42,11 @@ func main() {
 		log.Fatalf("credentials: %v", err)
 	}
 
-	reg := registry.New().Register(core.Nodes...)
+	llmClient := llm.New()
+	reg := registry.New().Register(core.Nodes...).Register(ai.Nodes(llmClient)...)
 	st := store.New(pool, cipher)
 	eng := engine.New(reg, st)
-	handler := api.NewRouter(reg, st, eng)
+	handler := api.NewRouter(reg, st, eng, llmClient)
 
 	srv := &http.Server{
 		Addr:              ":" + port,

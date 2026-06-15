@@ -1,11 +1,14 @@
 # crosscraft-brain
 
 A **forkable workflow-automation platform skeleton** — its own visual canvas and its own
-execution engine. No n8n dependency. Fork it to build vertical automation products; the
-first fork is **FarmersFront** (produce supply-chain traceability), included here as the
-`nodes-farm` example pack.
+execution engine. No n8n dependency. Fork it to build vertical automation products: add a
+node pack, a few tables, and branding — the core stays untouched.
 
 Four pillars: **Visual Workflow Editor · Integrations · AI · Transparent Monitoring.**
+
+> **Re-platform in progress:** the backend is moving to a single **Go** binary with an
+> embedded **Vite** SPA (the Go server lives in `server/`). See [BUILD.md](BUILD.md) for the
+> plan and status. The sections below describe the current (TypeScript) stack.
 
 ## Why it exists
 
@@ -21,10 +24,10 @@ packages/
   engine/      topological executor, durable suspend/resume, expression eval, Postgres persistence
   nodes-core/  trigger(manual/webhook), set, if, http, code, wait
   nodes-ai/    ai.summarize / ai.classify / ai.extract + LLM provider abstraction (Anthropic)
-  nodes-farm/  EXAMPLE FORK pack: farm.startLot, recordCooling/Packing/Shipping, closeLot
 apps/
   studio/      Next.js app = Editor + Integrations + AI Copilot + Monitoring; hosts the engine API
-db/            schema.sql (core) + farm.sql (vertical) + migrate.ts
+server/        Go backend (engine + API), re-platform target — see BUILD.md
+db/            schema.sql (core) + migrate.ts
 ```
 
 ## Key idea: the registry is the spine
@@ -33,15 +36,15 @@ Every node self-describes via `NodeDefinition`. The **canvas** reads serializabl
 descriptors (`/api/nodes`) to build the palette and auto-generate config forms; the
 **engine** reads the registry to execute. A fork registers its pack in one place:
 [apps/studio/lib/registry.ts](apps/studio/lib/registry.ts)
-(`new Registry().register(...coreNodes, ...aiNodes, ...farmNodes)`).
+(`new Registry().register(...coreNodes, ...aiNodes)`).
 
 ## Durable suspend/resume (the load-bearing primitive)
 
-A node may `ctx.suspend({ kind: 'webhook' })`; the engine persists the full run state to
+A node may suspend the run (`kind: 'webhook'`); the engine persists the full run state to
 Postgres (`executions.state`, `status='waiting'`) and returns. `POST /api/resume/{id}`
 rehydrates and continues, injecting the payload as the resumed node's output. This is how
-"one lot = one long-running execution that pauses at each stage" works — generalized from
-the validated `farmersback` webhook-wait pattern, now fully owned.
+long-running processes that pause at each stage (an approval, an external event) work — the
+load-bearing primitive for durable, multi-step automations.
 
 ## Quick start — one command (Docker)
 
@@ -53,7 +56,7 @@ pnpm docker:up           # = docker compose up --build  → http://localhost:300
 ```
 
 The stack has two services: **postgres** → **studio** (the Next.js app, started once Postgres is
-healthy). Postgres applies the core + farm schema itself on first init of an empty data volume
+healthy). Postgres applies the core schema itself on first init of an empty data volume
 (`db/*.sql` mounted into its init dir). Tear down with `pnpm docker:down` (keep data) or
 `pnpm docker:reset` (drop the DB volume, so the schema re-applies on the next `up`).
 
@@ -64,7 +67,6 @@ corepack enable && pnpm install
 cp .env.example .env                 # set CREDENTIALS_SECRET; AI keys for Copilot/AI nodes
 pnpm db:up                           # just Postgres on :5433 (docker)
 node --env-file=.env --import tsx db/migrate.ts            # core tables
-node --env-file=.env --import tsx db/migrate.ts db/farm.sql # + farm vertical tables
 pnpm --filter @crosscraft/studio dev # studio on http://localhost:3000
 ```
 
@@ -86,29 +88,11 @@ node --env-file=.env --import tsx scripts/engine-smoke.ts
 The studio HTTP surface mirrors this: `POST /api/webhook/{path}` to start, `POST
 /api/resume/{id}` to advance, `GET /api/executions/{id}` to inspect.
 
-## The FarmersFront fork (proof of forkability)
-
-`nodes-farm` + `db/farm.sql` + one line in `lib/registry.ts` + `/api/farm/report` turn the
-skeleton into a real vertical. Run the lot lifecycle entirely on this engine:
-
-```bash
-# start a lot (Harvest), then advance Cool/Pack/Ship, then get the trace report
-curl -X POST localhost:3000/api/webhook/start-lot -H 'content-type: application/json' \
-  -d '{"commodity":"Romaine","harvest_date":"2026-06-09","location":"Field B7"}'
-# -> { executionId }   ... then 3x:
-curl -X POST localhost:3000/api/resume/<executionId> -H 'content-type: application/json' \
-  -d '{"location":"Cooler #2","kde":{"temp_f":34}}'
-curl -X POST localhost:3000/api/farm/report -H 'content-type: application/json' \
-  -d '{"executionId":"<executionId>"}'        # -> HTML trace (CTEs + KDEs + TLC)
-```
-
-One lot = one execution; each stage is a `core.wait` resumed by a field event; CTE/KDE rows
-land in `events`. PDF rendering is the same Gotenberg step proven in `../farmersback`.
-
 ## Stack
 
 Next.js 15 · React 19 · TypeScript · Tailwind v4 · React Flow (`@xyflow/react`) · Postgres ·
 pnpm + Turborepo · Anthropic Claude (`claude-haiku-4-5` in-node, `claude-sonnet-4-6` copilot).
+Backend re-platform target: **Go** (`server/`) + **Vite** SPA — see [BUILD.md](BUILD.md).
 
 ## Scope (MVP)
 
