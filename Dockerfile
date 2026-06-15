@@ -1,38 +1,39 @@
 # syntax=docker/dockerfile:1
 
 # ─────────────────────────────────────────────────────────────────────────────
-# crosscraft-brain studio — monorepo (pnpm) → Next.js standalone server.
-# Build context is the repo ROOT. Two targets:
-#   builder  full workspace + tooling (also used by the one-shot `migrate` service)
-#   runner   slim production image that serves the studio
+# crosscraft-brain — a single Go binary that embeds the Vite SPA.
+# Build context is the repo ROOT. Three stages:
+#   web      pnpm workspace builds apps/web  -> server/web/dist
+#   build    Go compiles the binary with the embedded SPA
+#   runtime  distroless image with just the static binary
 # ─────────────────────────────────────────────────────────────────────────────
 
-FROM node:20-bookworm-slim AS base
+# ── web: build the Vite SPA into server/web/dist ──
+FROM node:20-bookworm-slim AS web
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 RUN corepack enable
 WORKDIR /app
-
-# ── builder: install all workspaces and build the studio ──
-FROM base AS builder
-# Copy the whole monorepo (see .dockerignore for what's excluded).
 COPY . .
 RUN pnpm install --frozen-lockfile
-RUN pnpm --filter @crosscraft/studio build
+RUN pnpm --filter @crosscraft/web build
 
-# ── runner: minimal image running the standalone server ──
-FROM node:20-bookworm-slim AS runner
+# ── build: compile the Go server (embeds server/web/dist) ──
+FROM golang:1.26-bookworm AS build
+WORKDIR /src/server
+# Module graph first for layer caching.
+COPY server/go.mod server/go.sum ./
+RUN go mod download
+# Server sources, plus the SPA built in the previous stage.
+COPY server/ ./
+COPY --from=web /app/server/web/dist ./web/dist
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/crosscraft ./cmd/crosscraft
+
+# ── runtime: minimal image with just the static binary ──
+FROM gcr.io/distroless/static-debian12:nonroot AS runtime
 WORKDIR /app
-ENV NODE_ENV=production
-ENV PORT=3000
-ENV HOSTNAME=0.0.0.0
-
-# Run as the unprivileged node user shipped with the base image.
-USER node
-
-# Standalone output already contains a pruned node_modules + traced workspace packages.
-COPY --from=builder --chown=node:node /app/apps/studio/.next/standalone ./
-COPY --from=builder --chown=node:node /app/apps/studio/.next/static ./apps/studio/.next/static
-
-EXPOSE 3000
-CMD ["node", "apps/studio/server.js"]
+ENV PORT=8080
+COPY --from=build /out/crosscraft /app/crosscraft
+EXPOSE 8080
+USER nonroot:nonroot
+ENTRYPOINT ["/app/crosscraft"]

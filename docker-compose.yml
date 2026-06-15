@@ -1,6 +1,6 @@
-# crosscraft-brain — one-command stack: Postgres + migrations + the studio app.
+# crosscraft-brain — one-command stack: Postgres + the single Go binary (API + UI).
 #
-#   docker compose up --build     # boot everything; studio on http://localhost:3000
+#   docker compose up --build     # boot everything; app on http://localhost:8080
 #
 # Secrets/AI config are read from the repo-root .env via ${VAR} interpolation (Compose loads
 # it automatically). Everything has a sensible default, so it also boots on a fresh clone.
@@ -16,23 +16,22 @@ services:
       - "5433:5432" # published for host tools; services talk to postgres:5432 internally
     volumes:
       - pgdata:/var/lib/postgresql/data
-      # Core + farm schema, applied automatically on first init of an empty data volume.
+      # Core schema, applied automatically on first init of an empty data volume.
       # (Idempotent SQL; to re-apply after editing, `pnpm docker:reset` recreates the volume.)
       - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
-      - ./db/farm.sql:/docker-entrypoint-initdb.d/02-farm.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-crosscraft} -d ${DB_NAME:-crosscraft}"]
       interval: 5s
       timeout: 5s
       retries: 10
 
-  studio:
+  server:
     build:
       context: .
-      target: runner
+      target: runtime
     environment:
       DATABASE_URL: postgres://${DB_USER:-crosscraft}:${DB_PASSWORD:-crosscraft}@postgres:5432/${DB_NAME:-crosscraft}
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
       CREDENTIALS_SECRET: ${CREDENTIALS_SECRET:-0000000000000000000000000000000000000000000000000000000000000000}
       # AI provider (optional). Set these in .env to enable Copilot + AI nodes.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
@@ -40,10 +39,9 @@ services:
       AI_API_KEY: ${AI_API_KEY:-}
       AI_MODEL_FAST: ${AI_MODEL_FAST:-}
       AI_MODEL_SMART: ${AI_MODEL_SMART:-}
-      HOSTNAME: 0.0.0.0
-      PORT: "3000"
+      PORT: "8080"
     ports:
-      - "3000:3000"
+      - "8080:8080"
     depends_on:
       postgres:
         condition: service_healthy

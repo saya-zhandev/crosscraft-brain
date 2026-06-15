@@ -8,5 +8,8 @@
 *.log
 .DS_Store
 **/*.tsbuildinfo
+# local Go dev binary (the image builds its own)
+server/crosscraft
+server/crosscraft.exe
 Dockerfile
 .dockerignore
