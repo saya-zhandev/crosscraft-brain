@@ -47,6 +47,9 @@ func main() {
 	reg := registry.New().Register(core.Nodes...).Register(ai.Nodes(llmClient)...)
 	st := store.New(pool, cipher)
 	eng := engine.New(reg, st)
+	// Bounded async pool: caps concurrently-executing workflows and recovers any
+	// runs left 'running' by a previous process (durability across restart).
+	eng.StartWorkers(ctx, 8, 256)
 	handler := api.NewRouter(reg, st, eng, llmClient, web.FS())
 
 	srv := &http.Server{

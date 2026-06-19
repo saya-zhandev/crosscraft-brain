@@ -72,6 +72,24 @@ func (m *memStore) LoadExecution(_ context.Context, eid string) (*LoadedExecutio
 func (m *memStore) LoadWorkflow(_ context.Context, wfID string) (*schema.Workflow, error) {
 	return m.wf[wfID], nil
 }
+func (m *memStore) ClaimWaiting(_ context.Context, eid string) (bool, error) {
+	e := m.execs[eid]
+	if e == nil || e.Status != "waiting" {
+		return false, nil
+	}
+	e.Status = "running"
+	return true, nil
+}
+func (m *memStore) ListRunningExecutionIDs(_ context.Context) ([]string, error) {
+	var ids []string
+	for eid, e := range m.execs {
+		if e.Status == "running" {
+			ids = append(ids, eid)
+		}
+	}
+	return ids, nil
+}
+func (m *memStore) FailStaleRunningSteps(_ context.Context, _ string) error { return nil }
 
 func mustJSON(t *testing.T, v any) string {
 	t.Helper()
@@ -159,5 +177,69 @@ func TestSuspendResume(t *testing.T) {
 	want := `[{"json":{"echo":true,"resumed":true}}]`
 	if got != want {
 		t.Fatalf("resumed output\n got: %s\nwant: %s", got, want)
+	}
+}
+
+// TestDoubleResumeGuard verifies a second resume of the same execution is rejected.
+func TestDoubleResumeGuard(t *testing.T) {
+	reg := registry.New().Register(core.Nodes...)
+	store := newMemStore()
+	wf := &schema.Workflow{
+		ID: "wf3", Name: "wait", Active: true,
+		Nodes: []schema.WFNode{
+			{ID: "a", Type: "core.manualTrigger", Params: map[string]any{}},
+			{ID: "b", Type: "core.wait", Params: map[string]any{}},
+			{ID: "c", Type: "core.set", Params: map[string]any{"fields": map[string]any{"echo": `{{ $json.resumed }}`}}},
+		},
+		Edges: []schema.WFEdge{{ID: "e1", Source: "a", Target: "b"}, {ID: "e2", Source: "b", Target: "c"}},
+	}
+	store.wf[wf.ID] = wf
+
+	eng := New(reg, store)
+	res, err := eng.Run(context.Background(), wf, nil)
+	if err != nil || res.Status != "waiting" {
+		t.Fatalf("run: status=%s err=%v", res.Status, err)
+	}
+	if _, err := eng.Resume(context.Background(), res.ExecutionID, []schema.Item{{JSON: map[string]any{"resumed": true}}}); err != nil {
+		t.Fatalf("first resume should succeed: %v", err)
+	}
+	if _, err := eng.Resume(context.Background(), res.ExecutionID, []schema.Item{{JSON: map[string]any{"resumed": true}}}); err == nil {
+		t.Fatal("second resume must be rejected")
+	}
+}
+
+// TestRecoverInterruptedRun simulates a crash after node 'a' ran but before 'b',
+// then drives recovery (process) from the checkpointed state to completion.
+func TestRecoverInterruptedRun(t *testing.T) {
+	reg := registry.New().Register(core.Nodes...)
+	store := newMemStore()
+	wf := &schema.Workflow{
+		ID: "wf4", Name: "recover", Active: true,
+		Nodes: []schema.WFNode{
+			{ID: "a", Type: "core.manualTrigger", Params: map[string]any{}},
+			{ID: "b", Type: "core.set", Params: map[string]any{"fields": map[string]any{"v": `{{ $json.qty * 2 }}`}}},
+		},
+		Edges: []schema.WFEdge{{ID: "e1", Source: "a", Target: "b"}},
+	}
+	store.wf[wf.ID] = wf
+
+	eid := "exec-interrupted"
+	store.execs[eid] = &LoadedExecution{
+		ExecutionRecord: schema.ExecutionRecord{ID: eid, WorkflowID: wf.ID, Status: "running", StartedAt: nowStr()},
+		State: &RunState{
+			TriggerItems: []schema.Item{{JSON: map[string]any{"qty": 5}}},
+			NodeOutputs:  map[string]map[string][]schema.Item{"a": {"main": {{JSON: map[string]any{"qty": 5}}}}},
+			Visited:      []string{"a"},
+		},
+	}
+
+	eng := New(reg, store)
+	eng.process(context.Background(), eid) // continue from the checkpoint
+	if got := store.execs[eid].Status; got != "success" {
+		t.Fatalf("recovered run status=%s, want success", got)
+	}
+	out := store.execs[eid].State.NodeOutputs["b"]["main"]
+	if mustJSON(t, out) != `[{"json":{"qty":5,"v":10}}]` {
+		t.Fatalf("recovered output: %s", mustJSON(t, out))
 	}
 }

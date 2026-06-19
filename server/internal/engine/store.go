@@ -33,4 +33,14 @@ type Store interface {
 	GetCredentialData(ctx context.Context, id string) (map[string]any, error)
 	LoadExecution(ctx context.Context, id string) (*LoadedExecution, error)
 	LoadWorkflow(ctx context.Context, id string) (*schema.Workflow, error)
+
+	// ClaimWaiting atomically transitions a waiting execution to running and
+	// reports whether THIS caller won the transition (guards double-resume).
+	ClaimWaiting(ctx context.Context, executionID string) (bool, error)
+	// ListRunningExecutionIDs returns executions left in 'running' — used on
+	// startup to recover runs interrupted by a previous process.
+	ListRunningExecutionIDs(ctx context.Context) ([]string, error)
+	// FailStaleRunningSteps marks an execution's still-'running' step rows as
+	// errored (cleanup before a recovered run continues).
+	FailStaleRunningSteps(ctx context.Context, executionID string) error
 }

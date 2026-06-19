@@ -1,43 +1,44 @@
 @import "tailwindcss";
 
 /* ───────────────────────────────────────────────────────────────────────────
-   crosscraft-brain design tokens
+   crosscraft-brain design tokens — Claude-like warm light theme
    A fork rebrands by overriding these CSS variables — never by editing components.
    Two layers:
      1. :root  — raw brand values (the only thing a fork touches)
      2. @theme — maps them to Tailwind utilities (bg-panel, text-muted, bg-group-ai…)
-   Dark-only for now; a `.light` :root block could be added later without touching components.
+   Palette: Crail #C15F3C · Pampas #F4F3EE · Cloudy #B1ADA1 · White #FFFFFF
+            + accents Orange #D97757 · Blue #6A9BCC · Green #788C5D
    ─────────────────────────────────────────────────────────────────────────── */
 :root {
   /* surfaces */
-  --bg: #0b0e14;
-  --panel: #11151d;
-  --panel-2: #161b26;
-  --panel-3: #1b2230; /* raised / hover surface */
-  --border: #232a37;
-  --border-2: #2f3848; /* hover hairline */
+  --bg: #f4f3ee; /* Pampas — app background / canvas */
+  --panel: #ffffff; /* white — cards / surfaces */
+  --panel-2: #efede6; /* raised / buttons */
+  --panel-3: #e7e3d9; /* hover / pressed surface */
+  --border: #e0dccf; /* hairline */
+  --border-2: #b1ada1; /* Cloudy — stronger line / hover hairline */
 
   /* text */
-  --text: #e6e9ef;
-  --muted: #8b94a7;
+  --text: #2b2a26; /* warm near-black */
+  --muted: #6f6b62; /* warm gray */
 
-  /* brand accent */
-  --accent: #6366f1;
-  --accent-2: #818cf8;
+  /* brand accent — Crail terracotta */
+  --accent: #c15f3c; /* Crail */
+  --accent-2: #d97757; /* Accent Orange — hover */
   --accent-fg: #ffffff;
 
   /* run status */
-  --ok: #22c55e;
-  --warn: #f59e0b;
-  --err: #ef4444;
-  --wait: #38bdf8;
+  --ok: #788c5d; /* Accent Green */
+  --warn: #c0883e; /* warm amber */
+  --err: #bc4b2f; /* deep terracotta-red */
+  --wait: #6a9bcc; /* Accent Blue */
 
   /* node group accents (meaningful, not decorative) */
-  --group-trigger: #22c55e;
-  --group-transform: #6366f1;
-  --group-flow: #f59e0b;
-  --group-integration: #38bdf8;
-  --group-ai: #a855f7;
+  --group-trigger: #788c5d; /* green */
+  --group-transform: #6a9bcc; /* blue */
+  --group-flow: #c0883e; /* amber */
+  --group-integration: #c15f3c; /* terracotta */
+  --group-ai: #d97757; /* orange */
 
   /* radii */
   --radius: 10px;
@@ -79,7 +80,7 @@
   --color-foreground: var(--text);
   --color-card: var(--panel);
   --color-card-foreground: var(--text);
-  --color-popover: var(--panel-2);
+  --color-popover: var(--panel);
   --color-popover-foreground: var(--text);
   --color-primary: var(--accent);
   --color-primary-foreground: var(--accent-fg);
@@ -116,7 +117,7 @@ body {
   box-sizing: border-box;
 }
 
-/* thin scrollbars on dark surfaces */
+/* thin scrollbars */
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--border-2) transparent;
@@ -132,17 +133,17 @@ body {
   background-clip: content-box;
 }
 
-/* ── React Flow surface tweaks to match the dark theme ── */
+/* ── React Flow surface tweaks to match the light theme ── */
 .react-flow__attribution {
   display: none;
 }
 .react-flow__edge-path {
-  stroke: #3a4456;
+  stroke: var(--border-2);
   stroke-width: 2;
 }
 .react-flow__edge.selected .react-flow__edge-path,
 .react-flow__edge:hover .react-flow__edge-path {
-  stroke: var(--accent-2);
+  stroke: var(--accent);
 }
 .react-flow__handle {
   width: 10px;
@@ -156,17 +157,17 @@ body {
 .react-flow__controls {
   border-radius: 10px;
   overflow: hidden;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 16px rgba(43, 42, 38, 0.12);
   border: 1px solid var(--border);
 }
 .react-flow__controls button {
-  background: var(--panel-2);
+  background: var(--panel);
   border-color: var(--border);
   color: var(--text);
   fill: var(--text);
 }
 .react-flow__controls button:hover {
-  background: var(--panel-3);
+  background: var(--panel-2);
 }
 .react-flow__minimap {
   background: var(--panel) !important;

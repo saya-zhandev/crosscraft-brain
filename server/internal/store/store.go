@@ -308,6 +308,43 @@ func (s *Store) GetExecutionSteps(ctx context.Context, executionID string) ([]sc
 	return out, rows.Err()
 }
 
+// ClaimWaiting atomically flips a waiting execution to running; RowsAffected==1
+// means this caller won (guards double-resume).
+func (s *Store) ClaimWaiting(ctx context.Context, executionID string) (bool, error) {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE executions SET status='running' WHERE id=$1 AND status='waiting'`, executionID)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// ListRunningExecutionIDs returns executions left 'running' (for crash recovery).
+func (s *Store) ListRunningExecutionIDs(ctx context.Context) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `SELECT id FROM executions WHERE status='running' ORDER BY started_at ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var eid string
+		if err := rows.Scan(&eid); err != nil {
+			return nil, err
+		}
+		ids = append(ids, eid)
+	}
+	return ids, rows.Err()
+}
+
+// FailStaleRunningSteps errors out an execution's still-'running' step rows.
+func (s *Store) FailStaleRunningSteps(ctx context.Context, executionID string) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE execution_steps SET status='error', error='interrupted (process restart)', finished_at=now()
+		 WHERE execution_id=$1 AND status='running'`, executionID)
+	return err
+}
+
 // ---- credentials -----------------------------------------------------------
 
 // CredentialRow is the safe (no secret) credential view.

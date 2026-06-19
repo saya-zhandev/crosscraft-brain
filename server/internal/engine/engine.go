@@ -10,7 +10,9 @@ package engine
 import (
 	"context"
 	"fmt"
+	"log"
 	"sort"
+	"sync"
 
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/expr"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/id"
@@ -22,11 +24,39 @@ import (
 type Engine struct {
 	reg   *registry.Registry
 	store Store
+
+	// Async bounded pool (enabled by StartWorkers). When async is false, Run and
+	// Resume drive inline in the caller's goroutine and return the full result —
+	// the mode used by unit tests.
+	async  bool
+	jobs   chan string
+	mu     sync.Mutex
+	active map[string]bool
 }
 
-// New constructs an Engine.
+// New constructs a synchronous Engine. Call StartWorkers to switch to the
+// bounded async worker pool (used in production).
 func New(reg *registry.Registry, store Store) *Engine {
-	return &Engine{reg: reg, store: store}
+	return &Engine{reg: reg, store: store, active: map[string]bool{}}
+}
+
+// StartWorkers switches the engine to async mode: runs are driven by a bounded
+// pool of `workers` goroutines pulling from a `queue`-deep channel, capping the
+// number of concurrently executing workflows. It also recovers executions left
+// 'running' by a previous process (durability across restart).
+func (e *Engine) StartWorkers(ctx context.Context, workers, queue int) {
+	if workers < 1 {
+		workers = 1
+	}
+	if queue < 1 {
+		queue = 1
+	}
+	e.jobs = make(chan string, queue)
+	e.async = true
+	for i := 0; i < workers; i++ {
+		go e.worker(ctx)
+	}
+	go e.recoverRunning(ctx)
 }
 
 // RunResult is the outcome of a run/resume up to the next terminal or suspend.
@@ -282,29 +312,40 @@ func (e *Engine) drive(ctx context.Context, wf *schema.Workflow, executionID str
 	return RunResult{ExecutionID: executionID, Status: "success", Outputs: terminalOutputs(wf, state)}, nil
 }
 
-// Run starts a new execution. triggerItems is the trigger/webhook payload.
+// Run starts a new execution. In sync mode it drives to completion/suspend and
+// returns the full result; in async mode it persists the seed state, enqueues the
+// run on the bounded pool, and returns immediately with status "running".
 func (e *Engine) Run(ctx context.Context, wf *schema.Workflow, triggerItems []schema.Item) (RunResult, error) {
 	trigger, err := e.findTrigger(wf)
-	if err != nil {
-		return RunResult{}, err
-	}
-	executionID, err := e.store.CreateExecution(ctx, wf.ID)
 	if err != nil {
 		return RunResult{}, err
 	}
 	if triggerItems == nil {
 		triggerItems = []schema.Item{{JSON: map[string]any{}}}
 	}
+	executionID, err := e.store.CreateExecution(ctx, wf.ID)
+	if err != nil {
+		return RunResult{}, err
+	}
 	state := &RunState{
 		TriggerItems: triggerItems,
 		NodeOutputs:  map[string]map[string][]schema.Item{},
 		Visited:      []string{},
 	}
-	return e.drive(ctx, wf, executionID, state, []string{trigger.ID})
+	if !e.async {
+		return e.drive(ctx, wf, executionID, state, []string{trigger.ID})
+	}
+	// Persist the seed so a crash before the first node is still recoverable.
+	if err := e.store.SaveState(ctx, executionID, state); err != nil {
+		return RunResult{}, err
+	}
+	e.enqueue(executionID)
+	return RunResult{ExecutionID: executionID, Status: "running"}, nil
 }
 
-// Resume continues a waiting execution with the payload that arrived (the
-// resumed node's output).
+// Resume continues a waiting execution with the payload that arrived (the resumed
+// node's output). The waiting→running transition is an atomic compare-and-set, so
+// duplicate/concurrent resumes are rejected — only the first wins.
 func (e *Engine) Resume(ctx context.Context, executionID string, payload []schema.Item) (RunResult, error) {
 	exec, err := e.store.LoadExecution(ctx, executionID)
 	if err != nil {
@@ -316,12 +357,13 @@ func (e *Engine) Resume(ctx context.Context, executionID string, payload []schem
 	if exec.Status != "waiting" || exec.State == nil || exec.WaitingNodeID == nil {
 		return RunResult{}, fmt.Errorf("execution %s is not waiting (status=%s)", executionID, exec.Status)
 	}
-	wf, err := e.store.LoadWorkflow(ctx, exec.WorkflowID)
+	// Atomic guard against double-resume: only one caller flips waiting→running.
+	claimed, err := e.store.ClaimWaiting(ctx, executionID)
 	if err != nil {
 		return RunResult{}, err
 	}
-	if wf == nil {
-		return RunResult{}, fmt.Errorf("workflow not found: %s", exec.WorkflowID)
+	if !claimed {
+		return RunResult{}, fmt.Errorf("execution %s was already resumed", executionID)
 	}
 
 	state := exec.State
@@ -337,9 +379,135 @@ func (e *Engine) Resume(ctx context.Context, executionID string, payload []schem
 	}
 	visited[waitingNodeID] = true
 	state.Visited = setKeys(visited)
+	if err := e.store.SaveState(ctx, executionID, state); err != nil {
+		return RunResult{}, err
+	}
 
-	ready := enqueueReadySuccessors(wf, waitingNodeID, visited, []string{})
-	return e.drive(ctx, wf, executionID, state, ready)
+	if !e.async {
+		wf, err := e.store.LoadWorkflow(ctx, exec.WorkflowID)
+		if err != nil {
+			return RunResult{}, err
+		}
+		if wf == nil {
+			return RunResult{}, fmt.Errorf("workflow not found: %s", exec.WorkflowID)
+		}
+		ready := enqueueReadySuccessors(wf, waitingNodeID, visited, []string{})
+		return e.drive(ctx, wf, executionID, state, ready)
+	}
+	e.enqueue(executionID)
+	return RunResult{ExecutionID: executionID, Status: "running"}, nil
+}
+
+// ---- async worker pool -----------------------------------------------------
+
+func (e *Engine) enqueue(executionID string) { e.jobs <- executionID }
+
+func (e *Engine) worker(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case eid := <-e.jobs:
+			e.process(ctx, eid)
+		}
+	}
+}
+
+// claim ensures only one worker drives a given execution at a time (so a recovery
+// re-enqueue and a fresh enqueue can't double-drive the same run).
+func (e *Engine) claim(executionID string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.active[executionID] {
+		return false
+	}
+	e.active[executionID] = true
+	return true
+}
+
+func (e *Engine) release(executionID string) {
+	e.mu.Lock()
+	delete(e.active, executionID)
+	e.mu.Unlock()
+}
+
+// process drives one execution from its persisted state. It unifies fresh runs,
+// resumes, and crash recovery: the ready frontier is recomputed from `visited`.
+func (e *Engine) process(ctx context.Context, executionID string) {
+	if !e.claim(executionID) {
+		return // another worker already owns it
+	}
+	defer e.release(executionID)
+
+	exec, err := e.store.LoadExecution(ctx, executionID)
+	if err != nil || exec == nil || exec.Status != "running" {
+		return
+	}
+	wf, err := e.store.LoadWorkflow(ctx, exec.WorkflowID)
+	if err != nil || wf == nil {
+		_ = e.store.FinishExecution(ctx, executionID, "error")
+		return
+	}
+
+	state := exec.State
+	if state == nil {
+		state = &RunState{NodeOutputs: map[string]map[string][]schema.Item{}}
+	}
+	if state.NodeOutputs == nil {
+		state.NodeOutputs = map[string]map[string][]schema.Item{}
+	}
+	if state.TriggerItems == nil {
+		state.TriggerItems = []schema.Item{{JSON: map[string]any{}}}
+	}
+
+	visited := map[string]bool{}
+	for _, v := range state.Visited {
+		visited[v] = true
+	}
+
+	var ready []string
+	if len(visited) == 0 {
+		trigger, err := e.findTrigger(wf)
+		if err != nil {
+			_ = e.store.FinishExecution(ctx, executionID, "error")
+			return
+		}
+		ready = []string{trigger.ID}
+	} else {
+		ready = e.frontier(wf, visited)
+	}
+	if _, err := e.drive(ctx, wf, executionID, state, ready); err != nil {
+		log.Printf("execution %s: drive error: %v", executionID, err)
+	}
+}
+
+// frontier returns not-yet-visited nodes whose upstream sources are all visited —
+// the set ready to run when continuing a partially-executed graph.
+func (e *Engine) frontier(wf *schema.Workflow, visited map[string]bool) []string {
+	ready := []string{}
+	for nodeID := range visited {
+		ready = enqueueReadySuccessors(wf, nodeID, visited, ready)
+	}
+	return ready
+}
+
+// recoverRunning re-enqueues executions left 'running' by a previous process.
+// Per-node state was checkpointed after each step, so they continue from the last
+// checkpoint; stale 'running' step rows are failed first. The interrupted node may
+// re-run (at-least-once).
+func (e *Engine) recoverRunning(ctx context.Context) {
+	ids, err := e.store.ListRunningExecutionIDs(ctx)
+	if err != nil {
+		log.Printf("recovery: list running executions: %v", err)
+		return
+	}
+	if len(ids) > 0 {
+		log.Printf("recovery: re-enqueuing %d interrupted execution(s)", len(ids))
+	}
+	for _, eid := range ids {
+		_ = e.store.FailStaleRunningSteps(ctx, eid)
+		e.enqueue(eid)
+	}
 }
 
 // ---- small helpers ---------------------------------------------------------
