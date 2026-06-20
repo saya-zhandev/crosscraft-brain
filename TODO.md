@@ -1,4 +1,21 @@
-# TODO — Integration Nodes Roadmap (Go-native)
+# TODO — crosscraft-brain
+
+---
+
+## Brand consistency fixes ✅
+
+All three hardcoded dark colors that leaked through merge — fixed 2026-06-21.
+Root cause: React Flow / shadcn props, not Tailwind classes, so the rebrand sweep missed them.
+
+| # | File | Line | Offending | Fix |
+|---|------|------|-----------|-----|
+| 1 | `apps/web/src/components/Editor.tsx` | 458 | ~~`<Background color="#1c2230" />`~~ | `color="var(--border-2)"` (Cloudy `#b1ada1`) |
+| 2 | `apps/web/src/components/Editor.tsx` | 463 | ~~`maskColor="rgba(8,11,17,0.7)"`~~ | `maskColor="rgba(244,243,238,0.85)"` (Pampas `--bg`) |
+| 3 | `apps/web/src/components/ui/dialog.tsx` | 19 | ~~`bg-black/60`~~ | `bg-[color-mix(in_srgb,var(--text)_60%,transparent)]` (warm near-black) |
+
+---
+
+## Integration Nodes Roadmap (Go-native)
 
 Build a first-party catalog of integration nodes, in Go, prioritising the stacks our
 users live in: **Google → Microsoft → Adobe**, then the long tail. n8n's node catalog
@@ -221,10 +238,12 @@ round out the editor so workflows don't need the Code node for everything.
       Form Trigger, Manual chat trigger.
 - [~] **Data:** shipped: Date & Time (now/parse/add/subtract), Crypto (hash / HMAC /
       Base64), Rename Keys, **Extract From File** (CSV/JSON/text), **Convert to File**
-      (CSV/JSON). _Remaining:_ Edit Image, Compression (zip/gzip), Extract From File
-      (XML/PDF/ODS), Spreadsheet File (xlsx), HTML extract, XML, Markdown, JSON, Sort Keys.
-- [ ] **Comms primitives:** Send Email (SMTP), Read Email (IMAP), FTP/SFTP, SSH,
-      Execute Command, RSS Read, Webhook Respond
+      (CSV/JSON), **Compression** (gzip/zip compress+decompress), **HTML Extract**
+      (tag-strip), **JSON** (parse/stringify), **Sort Keys**.
+      _Remaining:_ Edit Image, Extract From File (XML/PDF/ODS), Spreadsheet File (xlsx), Markdown.
+- [~] **Comms primitives:** **Send Email (SMTP)**, **Execute Command**, **RSS Read**
+      (RSS 2.0 + Atom 1.0) shipped.
+      _Remaining:_ Read Email (IMAP), FTP/SFTP, SSH, Webhook Respond.
 - [ ] **AI cluster (LangChain-style):** AI Agent, Basic LLM Chain, Q&A/Retrieval Chain,
       Vector Store (Pinecone/PGVector), Embeddings, Memory, Tool nodes, Output Parser,
       Text Splitter, Document Loader  *(builds on existing `nodes/ai` + goja tools)*
@@ -236,18 +255,21 @@ round out the editor so workflows don't need the Code node for everything.
 Ordered roughly by demand. Most are REST → declarative framework; webhooks where the
 provider supports them.
 
-- [ ] **Communication:** Slack (+trigger), Discord, Telegram (+trigger), Twilio
-      (SMS/WhatsApp), WhatsApp Business, Mattermost, Zoom, Webex
-- [ ] **Productivity / PM:** Notion (+trigger), Airtable (+trigger), Asana, Trello,
-      ClickUp, Jira, Linear, monday.com, Todoist, Coda
-- [ ] **CRM / Marketing:** HubSpot, Salesforce, Pipedrive, Zoho CRM, Mailchimp,
-      SendGrid, Customer.io, Intercom, ActiveCampaign, Brevo
-- [ ] **Dev / DevOps:** GitHub (+trigger), GitLab, Bitbucket, Jenkins, Docker, Sentry,
-      PagerDuty, Grafana
+- [~] **Communication:** **Slack**, **Discord**, **Telegram**, **Twilio** (SMS/WhatsApp)
+      shipped in `nodes/comm`.
+      _Remaining:_ triggers (polling), WhatsApp Business, Mattermost, Zoom, Webex.
+- [~] **Productivity / PM:** **Notion**, **Airtable**, **Asana**, **Trello**, **ClickUp**,
+      **Jira** (Cloud), **Linear**, **Todoist** shipped in `nodes/productivity`.
+      _Remaining:_ triggers (polling), monday.com, Coda.
+- [~] **CRM / Marketing:** **HubSpot**, **Pipedrive**, **Mailchimp**, **SendGrid** shipped
+      in `nodes/crm`.
+      _Remaining:_ Salesforce, Zoho CRM, Customer.io, Intercom, ActiveCampaign, Brevo.
+- [~] **Dev / DevOps:** **GitHub**, **GitLab**, **Sentry** shipped in `nodes/dev`.
+      _Remaining:_ triggers, Bitbucket, Jenkins, Docker, PagerDuty, Grafana.
 - [ ] **Cloud / Storage / DB:** AWS (S3, SES, SQS, Lambda, DynamoDB, Textract,
       Rekognition), Postgres, MySQL, MongoDB, Redis, Snowflake, Supabase, Dropbox, Box
-- [ ] **Payments / Commerce:** Stripe (+trigger), PayPal, Shopify (+trigger),
-      WooCommerce, QuickBooks, Xero, Square
+- [~] **Payments / Commerce:** **Stripe** shipped in `nodes/payments`.
+      _Remaining:_ triggers, PayPal, Shopify (+trigger), WooCommerce, QuickBooks, Xero, Square.
 - [ ] **AI / ML:** OpenAI, Hugging Face, Cohere, Mistral, Pinecone, Qdrant, ElevenLabs,
       Stability AI, Perplexity
 - [ ] **Generic protocols:** GraphQL, gRPC, SOAP, MQTT, AMQP/RabbitMQ, Kafka, NATS,

@@ -455,12 +455,12 @@ function EditorInner({ workflow }: { workflow: Workflow }) {
                 fitView
                 proOptions={{ hideAttribution: true }}
               >
-                <Background color="#1c2230" gap={18} />
+                <Background color="var(--border-2)" gap={18} />
                 <Controls />
                 <MiniMap
                   pannable
                   zoomable
-                  maskColor="rgba(8,11,17,0.7)"
+                  maskColor="rgba(244,243,238,0.85)"
                   nodeColor={(n) => groupVar((n.data as CcNodeData).descriptor?.group ?? 'transform')}
                   nodeStrokeWidth={2}
                 />

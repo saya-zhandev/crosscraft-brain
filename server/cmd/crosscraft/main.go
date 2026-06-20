@@ -19,9 +19,14 @@ import (
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/llm"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/nodes/adobe"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/nodes/ai"
+	"github.com/CrossCraftAI/crosscraft-brain/server/internal/nodes/comm"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/nodes/core"
+	"github.com/CrossCraftAI/crosscraft-brain/server/internal/nodes/crm"
+	"github.com/CrossCraftAI/crosscraft-brain/server/internal/nodes/dev"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/nodes/google"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/nodes/microsoft"
+	"github.com/CrossCraftAI/crosscraft-brain/server/internal/nodes/payments"
+	"github.com/CrossCraftAI/crosscraft-brain/server/internal/nodes/productivity"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/oauth"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/registry"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/scheduler"
@@ -55,7 +60,12 @@ func main() {
 		Register(ai.Nodes(llmClient)...).
 		Register(google.Nodes()...).
 		Register(microsoft.Nodes()...).
-		Register(adobe.Nodes()...)
+		Register(adobe.Nodes()...).
+		Register(comm.Nodes()...).
+		Register(productivity.Nodes()...).
+		Register(crm.Nodes()...).
+		Register(payments.Nodes()...).
+		Register(dev.Nodes()...)
 	st := store.New(pool, cipher)
 	eng := engine.New(reg, st)
 	// Bounded async pool: caps concurrently-executing workflows and recovers any

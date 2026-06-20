@@ -55,8 +55,9 @@ type Node struct {
 	// BaseURL) so the user can override the endpoint at runtime — e.g. an
 	// Acrobat Sign account shard or a self-hosted instance.
 	BaseURLParam string
-	CredType     string // credentialType for the credential param
+	CredType     string            // credentialType for the credential param
 	Auth         Auth
+	Headers      map[string]string // extra fixed request headers (e.g. API version)
 	Ops          []Op
 }
 
@@ -185,6 +186,9 @@ func (n Node) execute(ctx *schema.ExecContext, byKey map[string]Op) (schema.Node
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Accept", "application/json")
+	for k, v := range n.Headers {
+		req.Header.Set(k, v)
+	}
 
 	client := httpClient
 	switch n.Auth.Kind {

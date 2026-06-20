@@ -113,5 +113,76 @@ func Default() *Registry {
 			Name: "adobeOAuth2Api", DisplayName: "Adobe IMS (Server-to-Server)", Fields: clientFields,
 			OAuth2: &OAuth2{TokenURL: "https://ims-na1.adobelogin.com/ims/token/v3", GrantType: "client_credentials"},
 		},
+		// ── Communication ───────────────────────────────────────────────────────
+		Type{Name: "slackApi", DisplayName: "Slack (Bot Token)", Fields: []Field{
+			{Name: "accessToken", Label: "Bot Token (xoxb-...)", Type: "password", Required: true},
+		}},
+		Type{Name: "discordApi", DisplayName: "Discord (Bot Token)", Fields: []Field{
+			{Name: "accessToken", Label: "Bot Token", Type: "password", Required: true},
+		}},
+		Type{Name: "telegramApi", DisplayName: "Telegram Bot API", Fields: []Field{
+			{Name: "accessToken", Label: "Bot Token", Type: "password", Required: true},
+		}},
+		Type{Name: "twilioApi", DisplayName: "Twilio", Fields: []Field{
+			{Name: "accountSid", Label: "Account SID", Type: "string", Required: true},
+			{Name: "authToken", Label: "Auth Token", Type: "password", Required: true},
+		}},
+		// ── Productivity / PM ────────────────────────────────────────────────────
+		Type{Name: "notionApi", DisplayName: "Notion (Integration Token)", Fields: []Field{
+			{Name: "accessToken", Label: "Internal Integration Token (secret_...)", Type: "password", Required: true},
+		}},
+		Type{Name: "airtableTokenApi", DisplayName: "Airtable (Personal Access Token)", Fields: []Field{
+			{Name: "accessToken", Label: "Personal Access Token (pat...)", Type: "password", Required: true},
+		}},
+		Type{Name: "linearApi", DisplayName: "Linear API Key", Fields: []Field{
+			{Name: "accessToken", Label: "API Key", Type: "password", Required: true},
+		}},
+		Type{Name: "todoistApi", DisplayName: "Todoist API Token", Fields: []Field{
+			{Name: "accessToken", Label: "API Token", Type: "password", Required: true},
+		}},
+		Type{Name: "asanaApi", DisplayName: "Asana (Personal Access Token)", Fields: []Field{
+			{Name: "accessToken", Label: "Personal Access Token", Type: "password", Required: true},
+		}},
+		Type{Name: "clickUpApi", DisplayName: "ClickUp API Token", Fields: []Field{
+			{Name: "accessToken", Label: "API Token", Type: "password", Required: true},
+		}},
+		Type{Name: "jiraCloudApi", DisplayName: "Jira Cloud (Email + API Token)", Fields: []Field{
+			{Name: "email", Label: "Account Email", Type: "string", Required: true},
+			{Name: "apiToken", Label: "API Token", Type: "password", Required: true},
+			{Name: "subdomain", Label: "Subdomain (e.g. mycompany)", Type: "string", Required: true},
+		}},
+		Type{Name: "trelloApi", DisplayName: "Trello (API Key + Token)", Fields: []Field{
+			{Name: "apiKey", Label: "API Key", Type: "string", Required: true},
+			{Name: "accessToken", Label: "Token", Type: "password", Required: true},
+		}},
+		// ── CRM / Marketing ──────────────────────────────────────────────────────
+		Type{Name: "hubspotApi", DisplayName: "HubSpot (Private App Token)", Fields: []Field{
+			{Name: "accessToken", Label: "Private App Access Token", Type: "password", Required: true},
+		}},
+		Type{Name: "mailchimpApi", DisplayName: "Mailchimp", Fields: []Field{
+			{Name: "accessToken", Label: "API Key", Type: "password", Required: true},
+			{Name: "server", Label: "Server Prefix (e.g. us1)", Type: "string", Required: true},
+		}},
+		Type{Name: "sendgridApi", DisplayName: "SendGrid API Key", Fields: []Field{
+			{Name: "accessToken", Label: "API Key (SG....)", Type: "password", Required: true},
+		}},
+		Type{Name: "pipedriveApi", DisplayName: "Pipedrive API Token", Fields: []Field{
+			{Name: "accessToken", Label: "API Token", Type: "password", Required: true},
+		}},
+		// ── Payments / Commerce ───────────────────────────────────────────────────
+		Type{Name: "stripeApi", DisplayName: "Stripe Secret Key", Fields: []Field{
+			{Name: "accessToken", Label: "Secret Key (sk_live_... or sk_test_...)", Type: "password", Required: true},
+		}},
+		// ── Dev / DevOps ──────────────────────────────────────────────────────────
+		Type{Name: "githubApi", DisplayName: "GitHub (Personal Access Token)", Fields: []Field{
+			{Name: "accessToken", Label: "Personal Access Token", Type: "password", Required: true},
+		}},
+		Type{Name: "gitlabApi", DisplayName: "GitLab (Personal Access Token)", Fields: []Field{
+			{Name: "accessToken", Label: "Personal Access Token", Type: "password", Required: true},
+			{Name: "baseUrl", Label: "Base URL (default: gitlab.com)", Type: "string", Placeholder: "https://gitlab.com"},
+		}},
+		Type{Name: "sentryApi", DisplayName: "Sentry Auth Token", Fields: []Field{
+			{Name: "accessToken", Label: "Auth Token", Type: "password", Required: true},
+		}},
 	)
 }
