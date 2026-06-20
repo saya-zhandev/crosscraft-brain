@@ -13,11 +13,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/api"
+	"github.com/CrossCraftAI/crosscraft-brain/server/internal/credtype"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/crypto"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/engine"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/llm"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/nodes/ai"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/nodes/core"
+	"github.com/CrossCraftAI/crosscraft-brain/server/internal/oauth"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/registry"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/store"
 	"github.com/CrossCraftAI/crosscraft-brain/server/web"
@@ -50,7 +52,14 @@ func main() {
 	// Bounded async pool: caps concurrently-executing workflows and recovers any
 	// runs left 'running' by a previous process (durability across restart).
 	eng.StartWorkers(ctx, 8, 256)
-	handler := api.NewRouter(reg, st, eng, llmClient, web.FS())
+
+	// Credential types + OAuth2 flow. The engine uses the oauth service to mint
+	// authenticated HTTP clients for integration (REST) nodes.
+	credTypes := credtype.Default()
+	oauthSvc := oauth.New(st, credTypes, env("PUBLIC_BASE_URL", "http://localhost:"+port))
+	eng.SetClientProvider(oauthSvc)
+
+	handler := api.NewRouter(reg, st, eng, llmClient, web.FS(), oauthSvc, credTypes)
 
 	srv := &http.Server{
 		Addr:              ":" + port,

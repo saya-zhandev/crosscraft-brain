@@ -419,6 +419,43 @@ func (s *Store) GetCredentialData(ctx context.Context, credID string) (map[strin
 	return m, nil
 }
 
+// GetCredentialFull returns a credential's type, name, and decrypted data.
+func (s *Store) GetCredentialFull(ctx context.Context, id string) (string, string, map[string]any, error) {
+	var ctype, name, enc string
+	err := s.pool.QueryRow(ctx, `SELECT type, name, data_encrypted FROM credentials WHERE id=$1`, id).
+		Scan(&ctype, &name, &enc)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", nil, errors.New("credential not found")
+	}
+	if err != nil {
+		return "", "", nil, err
+	}
+	plain, err := s.cipher.Decrypt(enc)
+	if err != nil {
+		return "", "", nil, err
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(plain), &m); err != nil {
+		return "", "", nil, err
+	}
+	return ctype, name, m, nil
+}
+
+// UpdateCredentialData replaces a credential's encrypted data (used to store OAuth2
+// tokens after the flow and on refresh).
+func (s *Store) UpdateCredentialData(ctx context.Context, id string, data map[string]any) error {
+	b, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	enc, err := s.cipher.Encrypt(string(b))
+	if err != nil {
+		return err
+	}
+	_, err = s.pool.Exec(ctx, `UPDATE credentials SET data_encrypted=$2 WHERE id=$1`, id, enc)
+	return err
+}
+
 // ---- helpers ---------------------------------------------------------------
 
 func fmtTimePtr(t *time.Time) *string {

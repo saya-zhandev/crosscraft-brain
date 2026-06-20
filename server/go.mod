@@ -6,6 +6,7 @@ require (
 	github.com/dop251/goja v0.0.0-20260607120635-348e6bea910d
 	github.com/go-chi/chi/v5 v5.3.0
 	github.com/jackc/pgx/v5 v5.10.0
+	golang.org/x/oauth2 v0.36.0
 )
 
 require (

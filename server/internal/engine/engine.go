@@ -11,6 +11,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
 	"sort"
 	"sync"
 
@@ -22,8 +23,9 @@ import (
 
 // Engine executes workflows against a registry and a persistence Store.
 type Engine struct {
-	reg   *registry.Registry
-	store Store
+	reg     *registry.Registry
+	store   Store
+	clients ClientProvider
 
 	// Async bounded pool (enabled by StartWorkers). When async is false, Run and
 	// Resume drive inline in the caller's goroutine and return the full result —
@@ -39,6 +41,15 @@ type Engine struct {
 func New(reg *registry.Registry, store Store) *Engine {
 	return &Engine{reg: reg, store: store, active: map[string]bool{}}
 }
+
+// ClientProvider supplies authenticated HTTP clients for credentials (e.g. OAuth2).
+// Implemented by the oauth service; wired via SetClientProvider.
+type ClientProvider interface {
+	ClientForCredential(ctx context.Context, credentialID string) (*http.Client, error)
+}
+
+// SetClientProvider wires the credential→*http.Client provider used by REST nodes.
+func (e *Engine) SetClientProvider(cp ClientProvider) { e.clients = cp }
 
 // StartWorkers switches the engine to async mode: runs are driven by a bounded
 // pool of `workers` goroutines pulling from a `queue`-deep channel, capping the
@@ -213,6 +224,16 @@ func (e *Engine) buildContext(
 				return nil, nil
 			}
 			return e.store.GetCredentialData(ctx, v)
+		},
+		AuthorizedClient: func(paramName string) (*http.Client, error) {
+			idv, ok := params[paramName].(string)
+			if !ok || idv == "" {
+				return nil, fmt.Errorf("no credential set for %q", paramName)
+			}
+			if e.clients == nil {
+				return nil, fmt.Errorf("no client provider configured")
+			}
+			return e.clients.ClientForCredential(ctx, idv)
 		},
 		Trigger: state.TriggerItems,
 		Log:     func(message string, data any) { *logs = append(*logs, schema.LogEntry{Message: message, Data: data}) },

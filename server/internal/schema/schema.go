@@ -3,6 +3,8 @@
 // byte-for-byte so the existing frontend works unchanged.
 package schema
 
+import "net/http"
+
 // DefaultPort is the implicit input/output port id.
 const DefaultPort = "main"
 
@@ -126,7 +128,10 @@ type ExecContext struct {
 	RawParam   func(name string) any
 	Upstream   func(nodeID string) []Item
 	Credential func(paramName string) (map[string]any, error)
-	Trigger    []Item
+	// AuthorizedClient returns an HTTP client authenticated with the given
+	// credential param (e.g. an OAuth2 client) — used by REST/integration nodes.
+	AuthorizedClient func(paramName string) (*http.Client, error)
+	Trigger          []Item
 	Log        func(message string, data any)
 	First      func() map[string]any
 	IDs        ExecIDs

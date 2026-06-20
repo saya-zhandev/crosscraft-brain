@@ -5,6 +5,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"io/fs"
 	"net/http"
 	"path"
@@ -14,9 +15,11 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/CrossCraftAI/crosscraft-brain/server/internal/credtype"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/engine"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/id"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/llm"
+	"github.com/CrossCraftAI/crosscraft-brain/server/internal/oauth"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/registry"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/schema"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/store"
@@ -28,11 +31,13 @@ type Server struct {
 	store *store.Store
 	eng   *engine.Engine
 	llm   *llm.Client
+	oauth *oauth.Service
+	types *credtype.Registry
 }
 
 // NewRouter wires the /api routes.
-func NewRouter(reg *registry.Registry, st *store.Store, eng *engine.Engine, llmc *llm.Client, staticFS fs.FS) http.Handler {
-	s := &Server{reg: reg, store: st, eng: eng, llm: llmc}
+func NewRouter(reg *registry.Registry, st *store.Store, eng *engine.Engine, llmc *llm.Client, staticFS fs.FS, oauthSvc *oauth.Service, types *credtype.Registry) http.Handler {
+	s := &Server{reg: reg, store: st, eng: eng, llm: llmc, oauth: oauthSvc, types: types}
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
 	r.Use(cors)
@@ -56,6 +61,9 @@ func NewRouter(reg *registry.Registry, st *store.Store, eng *engine.Engine, llmc
 		r.Get("/credentials", s.listCredentials)
 		r.Post("/credentials", s.createCredential)
 		r.Delete("/credentials/{id}", s.deleteCredential)
+		r.Get("/credential-types", s.credentialTypes)
+		r.Get("/oauth2/auth-url", s.oauthAuthURL)
+		r.Get("/oauth2/callback", s.oauthCallback)
 
 		r.Post("/copilot", s.copilot)
 	})
@@ -500,6 +508,52 @@ func (s *Server) copilot(w http.ResponseWriter, r *http.Request) {
 
 	msg, _ := res["message"].(string)
 	writeJSON(w, http.StatusOK, map[string]any{"ops": ops, "message": msg})
+}
+
+// ---- credential types & OAuth2 ---------------------------------------------
+
+func (s *Server) credentialTypes(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.types.All())
+}
+
+func (s *Server) oauthAuthURL(w http.ResponseWriter, r *http.Request) {
+	credID := r.URL.Query().Get("credentialId")
+	if credID == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("credentialId is required"))
+		return
+	}
+	u, err := s.oauth.AuthURL(r.Context(), credID)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"url": u})
+}
+
+func (s *Server) oauthCallback(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	if e := q.Get("error"); e != "" {
+		writeOAuthHTML(w, false, e)
+		return
+	}
+	if err := s.oauth.Exchange(r.Context(), q.Get("state"), q.Get("code")); err != nil {
+		writeOAuthHTML(w, false, err.Error())
+		return
+	}
+	writeOAuthHTML(w, true, "")
+}
+
+func writeOAuthHTML(w http.ResponseWriter, ok bool, msg string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	heading := "Connected ✓"
+	if !ok {
+		heading = "Authorization failed: " + msg
+	}
+	fmt.Fprintf(w, `<!doctype html><meta charset="utf-8">
+<body style="font-family:system-ui,sans-serif;padding:48px;color:#2b2a26;background:#f4f3ee">
+<h3>%s</h3><p>You can close this window.</p>
+<script>try{window.opener&&window.opener.postMessage({type:"oauth2",ok:%v},"*")}catch(e){}setTimeout(function(){window.close()},900)</script>`,
+		html.EscapeString(heading), ok)
 }
 
 // ---- helpers ---------------------------------------------------------------
