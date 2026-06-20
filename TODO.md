@@ -52,10 +52,11 @@ These are prerequisites, not optional. Build once, reuse everywhere.
       large files don't buffer in memory.
 - [ ] **Load-options ("resource locator")** — `GET /api/nodes/{type}/options?...` so
       params can offer dynamic dropdowns (pick a spreadsheet / mailbox / channel).
-- [ ] **Trigger infra** — generalised **polling triggers** (interval + dedupe cursor)
-      and **schedule/cron trigger**; webhook-trigger registration for providers that
-      push (Graph subscriptions, Adobe Sign webhooks). Extends the existing
-      `core.webhookTrigger` + durable `wait`/resume.
+- [~] **Trigger infra** — **schedule/cron trigger shipped** (`internal/scheduler` +
+      `core.scheduleTrigger`, interval + 5-field cron via robfig/cron). _Remaining:_
+      generalised **polling triggers** (interval + dedupe cursor) and webhook-trigger
+      registration for providers that push (Graph subscriptions, Adobe Sign webhooks);
+      durable schedule state across restarts.
 - [ ] **Generic escape hatches** — `core.graphql`, generic **OAuth2 HTTP Request**
       (auth-aware `http`), and per-vendor "raw API call" nodes (Google/Graph/Adobe)
       so anything not yet wrapped is still reachable.
@@ -215,12 +216,13 @@ round out the editor so workflows don't need the Code node for everything.
       Sort, Remove Duplicates, No Operation, Stop & Error.
       _Remaining:_ Loop Over Items / Split in Batches (needs loop-back semantics in the
       engine), Compare Datasets.
-- [ ] **Triggers:** Schedule/Cron, Error Trigger, Execute Workflow (+ trigger),
-      Email (IMAP) Trigger, Form Trigger, Interval, Manual chat trigger
+- [~] **Triggers:** Schedule/Cron **shipped** (`core.scheduleTrigger`).
+      _Remaining:_ Error Trigger, Execute Workflow (+ trigger), Email (IMAP) Trigger,
+      Form Trigger, Manual chat trigger.
 - [~] **Data:** shipped: Date & Time (now/parse/add/subtract), Crypto (hash / HMAC /
-      Base64), Rename Keys. _Remaining:_ Edit Image, Compression (zip/gzip), Convert
-      to/from File, Extract From File (CSV/JSON/XML/PDF/ODS), Spreadsheet File, HTML
-      extract, XML, Markdown, JSON, Sort Keys.
+      Base64), Rename Keys, **Extract From File** (CSV/JSON/text), **Convert to File**
+      (CSV/JSON). _Remaining:_ Edit Image, Compression (zip/gzip), Extract From File
+      (XML/PDF/ODS), Spreadsheet File (xlsx), HTML extract, XML, Markdown, JSON, Sort Keys.
 - [ ] **Comms primitives:** Send Email (SMTP), Read Email (IMAP), FTP/SFTP, SSH,
       Execute Command, RSS Read, Webhook Respond
 - [ ] **AI cluster (LangChain-style):** AI Agent, Basic LLM Chain, Q&A/Retrieval Chain,

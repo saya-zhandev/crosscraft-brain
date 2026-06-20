@@ -24,6 +24,7 @@ import (
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/nodes/microsoft"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/oauth"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/registry"
+	"github.com/CrossCraftAI/crosscraft-brain/server/internal/scheduler"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/store"
 	"github.com/CrossCraftAI/crosscraft-brain/server/web"
 )
@@ -66,6 +67,9 @@ func main() {
 	credTypes := credtype.Default()
 	oauthSvc := oauth.New(st, credTypes, env("PUBLIC_BASE_URL", "http://localhost:"+port))
 	eng.SetClientProvider(oauthSvc)
+
+	// Fire schedule/cron triggers on active workflows.
+	scheduler.New(st, eng).Start(ctx)
 
 	handler := api.NewRouter(reg, st, eng, llmClient, web.FS(), oauthSvc, credTypes)
 
