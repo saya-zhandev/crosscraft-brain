@@ -20,6 +20,9 @@ type OAuth2 struct {
 	TokenURL   string            `json:"tokenUrl"`
 	Scopes     []string          `json:"scopes,omitempty"`
 	AuthParams map[string]string `json:"authParams,omitempty"` // extra authorize-URL params
+	// GrantType: "" / "authorization_code" (user redirect flow) or
+	// "client_credentials" (server-to-server; no AuthURL, no user step).
+	GrantType string `json:"grantType,omitempty"`
 }
 
 // Type describes a credential type.
@@ -99,6 +102,16 @@ func Default() *Registry {
 				{Name: "name", Label: "Header Name", Type: "string", Required: true, Placeholder: "Authorization"},
 				{Name: "value", Label: "Header Value", Type: "password", Required: true},
 			},
+		},
+		Type{
+			Name: "adobeSignApi", DisplayName: "Adobe Acrobat Sign (Integration Key)",
+			Fields: []Field{
+				{Name: "accessToken", Label: "Integration Key / Access Token", Type: "password", Required: true},
+			},
+		},
+		Type{
+			Name: "adobeOAuth2Api", DisplayName: "Adobe IMS (Server-to-Server)", Fields: clientFields,
+			OAuth2: &OAuth2{TokenURL: "https://ims-na1.adobelogin.com/ims/token/v3", GrantType: "client_credentials"},
 		},
 	)
 }

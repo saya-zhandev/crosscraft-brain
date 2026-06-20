@@ -17,6 +17,7 @@ import (
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/crypto"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/engine"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/llm"
+	"github.com/CrossCraftAI/crosscraft-brain/server/internal/nodes/adobe"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/nodes/ai"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/nodes/core"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/nodes/google"
@@ -52,7 +53,8 @@ func main() {
 		Register(core.Nodes...).
 		Register(ai.Nodes(llmClient)...).
 		Register(google.Nodes()...).
-		Register(microsoft.Nodes()...)
+		Register(microsoft.Nodes()...).
+		Register(adobe.Nodes()...)
 	st := store.New(pool, cipher)
 	eng := engine.New(reg, st)
 	// Bounded async pool: caps concurrently-executing workflows and recovers any

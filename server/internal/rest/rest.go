@@ -51,9 +51,13 @@ type Node struct {
 	Icon        string
 	Description string
 	BaseURL     string
-	CredType    string // credentialType for the credential param
-	Auth        Auth
-	Ops         []Op
+	// BaseURLParam, if set, adds a string param of this name (defaulting to
+	// BaseURL) so the user can override the endpoint at runtime — e.g. an
+	// Acrobat Sign account shard or a self-hosted instance.
+	BaseURLParam string
+	CredType     string // credentialType for the credential param
+	Auth         Auth
+	Ops          []Op
 }
 
 const credParam = "credential"
@@ -79,6 +83,11 @@ func (n Node) Build() schema.NodeDefinition {
 			label = o.Name
 		}
 		opts = append(opts, schema.ParamOption{Label: o.Resource + ": " + label, Value: o.key()})
+	}
+	if n.BaseURLParam != "" {
+		params = append(params, schema.ParamSchema{
+			Name: n.BaseURLParam, Label: "API base URL", Type: "string", Default: n.BaseURL,
+		})
 	}
 	params = append(params, schema.ParamSchema{
 		Name: "operation", Label: "Operation", Type: "select", Required: true, Options: opts,
@@ -130,7 +139,13 @@ func (n Node) execute(ctx *schema.ExecContext, byKey map[string]Op) (schema.Node
 	if err != nil {
 		return schema.NodeResult{}, err
 	}
-	u := strings.TrimRight(n.BaseURL, "/") + path
+	base := n.BaseURL
+	if n.BaseURLParam != "" {
+		if v, ok := ctx.Params[n.BaseURLParam].(string); ok && v != "" {
+			base = v
+		}
+	}
+	u := strings.TrimRight(base, "/") + path
 
 	q := url.Values{}
 	for key, pn := range op.Query {

@@ -2,6 +2,7 @@ package oauth
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -96,5 +97,47 @@ func TestAuthURLAndExchange(t *testing.T) {
 	// a connected credential yields a client
 	if _, err := svc.ClientForCredential(context.Background(), "c1"); err != nil {
 		t.Fatalf("client: %v", err)
+	}
+}
+
+// TestClientCredentials drives the server-to-server grant: ClientForCredential
+// returns a client that fetches a token (grant_type=client_credentials) and
+// injects it as a Bearer header.
+func TestClientCredentials(t *testing.T) {
+	var sawGrant string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/token" {
+			_ = r.ParseForm()
+			sawGrant = r.Form.Get("grant_type")
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"cc-tok","token_type":"Bearer","expires_in":3600}`))
+			return
+		}
+		_, _ = w.Write([]byte(r.Header.Get("Authorization"))) // protected resource echoes auth
+	}))
+	defer srv.Close()
+
+	types := credtype.NewRegistry().Register(credtype.Type{
+		Name: "ccType", DisplayName: "CC",
+		OAuth2: &credtype.OAuth2{TokenURL: srv.URL + "/token", GrantType: "client_credentials"},
+	})
+	store := &fakeStore{ctype: "ccType", data: map[string]any{"clientId": "cid", "clientSecret": "csec", "scope": "x y"}}
+	svc := New(store, types, "http://localhost:8080")
+
+	client, err := svc.ClientForCredential(context.Background(), "c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := client.Get(srv.URL + "/resource")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if string(b) != "Bearer cc-tok" {
+		t.Fatalf("authorization not injected: %q", string(b))
+	}
+	if sawGrant != "client_credentials" {
+		t.Fatalf("grant_type: %s", sawGrant)
 	}
 }

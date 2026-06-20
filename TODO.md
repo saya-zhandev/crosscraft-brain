@@ -34,26 +34,22 @@ single static binary.
 
 These are prerequisites, not optional. Build once, reuse everywhere.
 
-- [ ] **OAuth2 credential flow** — authorization-code + PKCE, refresh-token storage,
-      automatic token refresh on 401. Routes: `GET /api/oauth2/authorize?credType=…`
-      (redirect to provider), `GET /api/oauth2/callback` (exchange code → store
-      tokens). Persist `access_token`/`refresh_token`/`expiry` in the encrypted
-      credential blob.
-- [ ] **Credential *types* registry** — declarative `CredentialType{ name, fields,
-      oauth2: {authUrl, tokenUrl, scopes, …} }` so Google/MS/etc. self-describe (the
-      canvas renders the right form / "Connect" button). Mirrors n8n's credential
-      types.
-- [ ] **Per-service token source** — `oauth2.TokenSource` adapter that reads/writes the
-      credential store and auto-refreshes; hand the resulting `*http.Client` to each
-      vendor SDK.
-- [ ] **Declarative REST node framework** — a Go helper to define a node from data
-      (`resource → operation → {method, path, qs, body, pagination}`) so REST-backed
-      nodes (most of them) are ~50 lines, like n8n's *declarative* nodes. This is the
-      biggest force-multiplier; build it before Phase 1 scales.
-- [ ] **Pagination / rate-limit / retry helpers** — cursor + page-token + offset
-      strategies; exponential backoff with `Retry-After`; concurrency-bounded fan-out.
-- [ ] **Binary data handling** — stream large files to/from nodes (uploads/downloads)
-      without buffering whole files in memory; a binary store (disk/S3) keyed by run.
+- [x] **OAuth2 credential flow** — `internal/oauth`: authorization-code
+      (`GET /api/oauth2/auth-url` + `/callback`) **and** client-credentials
+      (server-to-server). Refresh + persist back to the encrypted credential blob.
+      _Remaining:_ PKCE.
+- [x] **Credential *types* registry** — `internal/credtype` + `GET /api/credential-types`
+      (Google / Microsoft / Adobe IMS / generic OAuth2 / header-auth / Adobe Sign).
+- [x] **Per-service token source** — auto-refreshing `*http.Client` via
+      `oauth.ClientForCredential`, wired to nodes through `ExecContext.AuthorizedClient`.
+- [x] **Declarative REST node framework** — `internal/rest`: data-defined
+      resources/operations → `NodeDefinition` (path interpolation, query/JSON body,
+      header/OAuth2 auth, retry, response→items, shared-param dedupe, `BaseURLParam`).
+- [~] **Pagination / rate-limit / retry** — 429/5xx retry with `Retry-After` done;
+      cursor / page-token / offset pagination strategies still TODO.
+- [~] **Binary data handling** — in-memory base64 via `Item.Binary` works (Drive media
+      upload/download). _Remaining:_ a streaming binary store (disk/S3) keyed by run so
+      large files don't buffer in memory.
 - [ ] **Load-options ("resource locator")** — `GET /api/nodes/{type}/options?...` so
       params can offer dynamic dropdowns (pick a spreadsheet / mailbox / channel).
 - [ ] **Trigger infra** — generalised **polling triggers** (interval + dedupe cursor)
@@ -75,23 +71,18 @@ pubsub, translate, language, vision), auth via `golang.org/x/oauth2/google`.
 **Auth:** OAuth2 (per-user) + Service Account / domain-wide delegation option.
 
 ### Workspace
-- [ ] **Google Sheets** + **Trigger** (`rowAdded`, `rowUpdated` — polling)
-  - Spreadsheet: Create, Delete
-  - Sheet: Append Row, Append-or-Update Row, Update Row, Get Row(s)/Lookup, Clear,
-    Create, Delete, Delete Rows/Columns
-- [ ] **Gmail** + **Trigger** (message received — polling)
-  - Message: Send, Reply, Get, Get Many, Delete, Mark Read/Unread, Add/Remove Labels
-  - Draft: Create, Get, Get Many, Delete
-  - Label: Create, Get, Get Many, Delete
-  - Thread: Get, Get Many, Reply, Trash/Untrash, Delete, Add/Remove Labels
-- [ ] **Google Calendar** + **Trigger** (event created/updated/started/ended)
-  - Calendar: Availability (free/busy)
-  - Event: Create, Get, Get Many, Update, Delete
-- [ ] **Google Drive** + **Trigger** (file/folder created/updated in a folder)
-  - File: Upload, Download, Create-from-text, Copy, Move, Share, Update, Delete
-  - Folder: Create, Share, Delete
-  - File/Folder: Search
-  - Shared Drive: Create, Get, Get Many, Update, Delete
+- [x] **Google Sheets** — shipped: spreadsheet get/create; values get/append/update/clear.
+      _Remaining:_ delete spreadsheet, delete rows/cols, header→object row mapping,
+      **Trigger** (rowAdded/rowUpdated polling).
+- [x] **Gmail** (read) — shipped: message list/get, label list.
+      _Remaining:_ send/reply (MIME build), drafts, threads, mark read / labels,
+      **Trigger** (polling).
+- [x] **Google Calendar** — shipped: event list/get/create/delete, calendar list.
+      _Remaining:_ event update, free/busy availability, **Trigger**.
+- [x] **Google Drive** — shipped: file list/get/delete, folder create, **media
+      upload/download** (`google.driveUpload` / `google.driveDownload`; multipart +
+      `alt=media`). _Remaining:_ copy/move/share, create-from-text, shared drives,
+      **Trigger**; true streaming via the binary store.
 - [ ] **Google Docs** — Document: Create, Get, Update (insert/replace text, styling)
 - [ ] **Google Slides** — Presentation: Create, Get, Replace Text, Get Page Thumbnail
 - [ ] **Google Contacts (People API)** — Contact: Create, Get, Get Many, Update, Delete
@@ -130,45 +121,68 @@ pubsub, translate, language, vision), auth via `golang.org/x/oauth2/google`.
 `github.com/Azure/azure-sdk-for-go/sdk/...` (azblob, azcosmos); MSSQL via
 `github.com/microsoft/go-mssqldb`. **Auth:** OAuth2 (Microsoft identity platform).
 
-### Microsoft 365 (Graph)
-- [ ] **Outlook** + **Trigger** (message received)
-  - Message: Send, Reply, Get, Get Many, Move, Update, Delete; Attachment: add/get
-  - Draft: Create/Update/Send; Folder + Folder Message: manage
-  - Event (calendar), Contact: CRUD
-- [ ] **Microsoft Excel (Graph)**
-  - Workbook: Get, Get Many; Worksheet: Get, Get Many, Clear, Delete
-  - Table: Add Row, Get Rows, Lookup, Get Columns; Range: Get, Update
-- [ ] **OneDrive** — File: Upload (stream), Download, Copy, Rename, Share, Search,
-      Delete; Folder: Create, Get Children, Rename, Search, Delete
-- [ ] **SharePoint** — Site: Get; List: Create, Get, Get Many; List Item: CRUD; File: manage
-- [ ] **Microsoft Teams** + **Trigger** — Channel: CRUD; Channel Message: Create, Get Many;
-      Chat Message: Create, Get, Get Many; Planner Task: CRUD
-- [ ] **OneNote** — Notebook/Section: Get, Get Many; Page: Create, Get, Get Many, Delete
-- [ ] **Microsoft To Do** — Task / Task List / Linked Resource: CRUD
-- [ ] **Microsoft Graph (generic)** — raw authenticated Graph call (escape hatch)
-- [ ] **Dynamics 365 (CRM)** — Account, Contact, Opportunity, Lead, etc.: CRUD + query
+### Microsoft 365 (Graph) — **shipped** (declarative, `microsoftOAuth2Api`, Graph v1.0)
+- [x] **Outlook** — core mail (list/get/send, …)
+- [x] **Microsoft Calendar (Graph)** — events: list/get/create/delete
+- [x] **Excel (Graph)** — worksheets + tables (rows)
+- [x] **OneDrive** — files/folders (metadata)
+- [x] **Microsoft Teams** — channels + messages
+- [x] **Microsoft To Do** — task lists + tasks
 
-### Azure
-- [ ] **Azure Blob Storage** — Container: manage; Blob: Upload (stream), Download
-      (stream), List, Delete
-- [ ] **Azure Cosmos DB** — Database/Container: manage; Item: Create, Get, Query, Delete
-- [ ] **Microsoft SQL Server** — Execute Query, Insert, Update, Delete (DB node)
-- [ ] **Power BI** — Dataset: push rows; Report/Dashboard: Get, Get Many
-- [ ] **Azure DevOps** — Work Item, Pipeline, Repo: manage (+ trigger)
-- [ ] **Azure OpenAI** — *AI variant of the LLM nodes via `AI_BASE_URL`*
+### Microsoft tail — **next** (drafted)
+- [ ] **Flesh out shipped services** — Outlook: reply, move, drafts, folders,
+      attachments; Excel: range get/update + workbook sessions; Teams: channel CRUD +
+      Planner tasks; Calendar: update + list calendars.
+- [ ] **SharePoint** (Graph `…/sites/{siteId}`) — Site: Get/Search; List:
+      Get/Get Many/Create; List Item: Get/Get Many/Create/Update/Delete; Drive/File:
+      list/get + upload/download (binary). Declarative + a `siteId` load-options picker.
+- [ ] **OneNote** (Graph) — Notebook: Get/Get Many; Section: Get/Get Many; Page:
+      Get/Get Many/Create (HTML body)/Delete. Page-create is multipart (HTML + binary).
+- [ ] **Microsoft Graph (generic)** — raw authenticated Graph call (method + path +
+      query + JSON body) reusing the OAuth2 client; one declarative node, free-form path
+      param — the escape hatch for anything unwrapped.
+- [ ] **Triggers** (Outlook / Teams / OneDrive / SharePoint) — Graph **change-notification
+      subscriptions** (webhooks) with subscription create/renew/validate, into the durable
+      `wait`/resume plumbing; **delta-query polling** fallback. Needs Phase-0 trigger infra.
+- [ ] **OneDrive / SharePoint media** — upload (`PUT /content`; resumable upload session
+      for >4 MB) + download (`GET /content`) into `Item.Binary`, mirroring
+      `google.driveUpload/Download`; true streaming via the binary store.
+- [ ] **Dynamics 365 (CRM)** — Web API (`/api/data/v9.2`): Account, Contact, Lead,
+      Opportunity + arbitrary entity: Create/Get/Get Many (OData `$filter`/`$select`)/
+      Update/Delete. Declarative + `BaseURLParam` for the org URL; a `dynamicsOAuth2Api`
+      cred (resource-scoped token).
+
+### Azure — **next** (drafted; not pure Graph → native, not declarative)
+- [ ] **Azure Blob Storage** — Container: list/create/delete; Blob: upload (stream),
+      download (stream), list, delete, copy. Native via
+      `azure-sdk-for-go/sdk/storage/azblob` + `azidentity` (a new credential kind:
+      connection string or service-principal — not the OAuth2 REST client).
+- [ ] **Azure Cosmos DB** — Database/Container: manage; Item: Create/Get/Query(SQL)/
+      Upsert/Delete. Native via `sdk/data/azcosmos`.
+- [ ] **Microsoft SQL Server** — Execute Query/Insert/Update/Delete: a **DB node** via
+      `github.com/microsoft/go-mssqldb` (connection-string credential), parameterized
+      queries; sibling to a future generic SQL node.
+- [ ] **Power BI** (REST `api.powerbi.com/v1.0/myorg`) — Dataset: push rows + refresh;
+      Report/Dashboard: Get/Get Many. Declarative.
+- [ ] **Azure DevOps** (REST) — Work Item, Pipeline run, Repo/PR: get/create
+      (+ trigger via service hooks). Declarative + `BaseURLParam` for the org.
+- [ ] **Azure OpenAI** — AI variant of the LLM nodes via `AI_BASE_URL` (no new node).
 
 ---
 
 ## Phase 3 — Adobe  (`nodes/adobe`)
 
-**Note:** Adobe ships **no official Go SDKs** → implement via REST on `net/http`
-(perfect fit for the declarative framework). Auth is OAuth Server-to-Server / JWT
-(Adobe Developer Console) per product.
+**Note:** Adobe ships **no official Go SDKs** → REST on the declarative framework.
+Auth is ready: **`adobeOAuth2Api`** (IMS server-to-server / client-credentials) and
+**`adobeSignApi`** (integration key). The remaining Adobe APIs below are mostly
+**async job** flows (submit → poll → download) over **binary**, so they need the
+Phase-0 streaming binary store + a small job-poll helper before they're built.
 
-- [ ] **Adobe Acrobat Sign** (e-signature) + **Trigger** (agreement signed/declined —
-      webhook)
-  - Agreement: Send for Signature, Get, Get Many, Cancel, Get Documents, Get Signing URL
-  - Library Document, Reminder, Webhook: manage
+- [x] **Adobe Acrobat Sign** (e-signature) — shipped: agreement list/get/create, get
+      signing URLs; library documents list. Auth: integration key (Bearer) via
+      `adobeSignApi`; account shard overridable per node (`baseUrl`).
+      _Remaining:_ send-for-signature, cancel, get documents, reminders, **Trigger**
+      (signed/declined webhook).
 - [ ] **Adobe PDF Services API** — the high-value Go workload (streamed file I/O):
   - Create PDF (from Office/HTML), Export PDF (→ Office/JPEG)
   - OCR, Compress, Linearize, Protect / Remove Protection

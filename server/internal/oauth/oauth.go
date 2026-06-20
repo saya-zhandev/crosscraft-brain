@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/clientcredentials"
 
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/credtype"
 )
@@ -129,6 +130,21 @@ func (s *Service) ClientForCredential(ctx context.Context, credID string) (*http
 	if err != nil {
 		return nil, err
 	}
+	t, ok := s.types.Get(ctype)
+	if !ok || t.OAuth2 == nil {
+		return nil, fmt.Errorf("credential type %q is not OAuth2", ctype)
+	}
+	// Server-to-server: fetch + auto-refresh tokens with no user/redirect step.
+	if t.OAuth2.GrantType == "client_credentials" {
+		ccfg := &clientcredentials.Config{
+			ClientID:     str(data["clientId"], ""),
+			ClientSecret: str(data["clientSecret"], ""),
+			TokenURL:     str(data["tokenUrl"], t.OAuth2.TokenURL),
+			Scopes:       scopesOf(data, t.OAuth2.Scopes),
+			AuthStyle:    oauth2.AuthStyleInParams,
+		}
+		return ccfg.Client(ctx), nil
+	}
 	cfg, _, err := s.config(ctype, data)
 	if err != nil {
 		return nil, err
@@ -228,6 +244,13 @@ func tokenFromData(data map[string]any) *oauth2.Token {
 func str(v any, def string) string {
 	if s, ok := v.(string); ok && s != "" {
 		return s
+	}
+	return def
+}
+
+func scopesOf(data map[string]any, def []string) []string {
+	if sc := str(data["scope"], ""); sc != "" {
+		return strings.Fields(sc)
 	}
 	return def
 }
