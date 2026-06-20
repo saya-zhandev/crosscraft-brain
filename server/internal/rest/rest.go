@@ -84,11 +84,21 @@ func (n Node) Build() schema.NodeDefinition {
 		Name: "operation", Label: "Operation", Type: "select", Required: true, Options: opts,
 	})
 
-	// Per-op params, shown only when that operation is selected.
+	// Per-op params, shown only when their operation(s) are selected. Params shared
+	// by several ops (same Name) are emitted once with a combined showWhen.
+	paramIndex := map[string]int{}
 	for _, o := range n.Ops {
 		for _, p := range o.Params {
-			p.ShowWhen = &schema.ShowWhen{Param: "operation", Equals: []any{o.key()}}
-			params = append(params, p)
+			if idx, ok := paramIndex[p.Name]; ok {
+				if sw := params[idx].ShowWhen; sw != nil {
+					sw.Equals = append(sw.Equals, o.key())
+				}
+				continue
+			}
+			pp := p
+			pp.ShowWhen = &schema.ShowWhen{Param: "operation", Equals: []any{o.key()}}
+			params = append(params, pp)
+			paramIndex[p.Name] = len(params) - 1
 		}
 	}
 
