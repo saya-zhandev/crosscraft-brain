@@ -86,3 +86,7 @@ Messages API (Claude, or any compatible endpoint).
 
 Triggers = manual + webhook + resume. Expression engine is intentionally minimal. Auth/RBAC,
 version history, a node marketplace, and cross-restart run recovery are future work.
+
+## License
+
+[GNU General Public License v3.0 or later](LICENSE) (`GPL-3.0-or-later`).

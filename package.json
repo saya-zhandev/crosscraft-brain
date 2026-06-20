@@ -2,6 +2,7 @@
   "name": "crosscraft-brain",
   "version": "0.1.0",
   "private": true,
+  "license": "GPL-3.0-or-later",
   "description": "Forkable workflow-automation platform skeleton: visual editor, integrations, AI, transparent monitoring.",
   "type": "module",
   "scripts": {
