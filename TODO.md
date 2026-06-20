@@ -195,15 +195,18 @@ Beyond integrations, n8n ships logic/utility nodes. Several already exist; the r
 round out the editor so workflows don't need the Code node for everything.
 
 **Have:** `manualTrigger`, `webhookTrigger`, `set` (Edit Fields), `if`, `http`,
-`code`, `wait`.
+`code`, `wait` — plus the Phase-4 batch below (all in `nodes/core`, unit-tested).
 
-- [ ] **Flow:** Switch, Filter, Merge, Loop Over Items (Split in Batches), Split Out,
-      Aggregate, Limit, Sort, Remove Duplicates, Compare Datasets, No-Op, Stop & Error
+- [x] **Flow** (shipped): Switch, Filter, Merge (append), Split Out, Aggregate, Limit,
+      Sort, Remove Duplicates, No Operation, Stop & Error.
+      _Remaining:_ Loop Over Items / Split in Batches (needs loop-back semantics in the
+      engine), Compare Datasets.
 - [ ] **Triggers:** Schedule/Cron, Error Trigger, Execute Workflow (+ trigger),
       Email (IMAP) Trigger, Form Trigger, Interval, Manual chat trigger
-- [ ] **Data:** Date & Time, Crypto (hash/HMAC/sign), Edit Image, Compression
-      (zip/gzip), Convert to/from File, Extract From File (CSV/JSON/XML/PDF/ODS),
-      Spreadsheet File, HTML (extract), XML, Markdown, JSON, Rename Keys, Sort Keys
+- [~] **Data:** shipped: Date & Time (now/parse/add/subtract), Crypto (hash / HMAC /
+      Base64), Rename Keys. _Remaining:_ Edit Image, Compression (zip/gzip), Convert
+      to/from File, Extract From File (CSV/JSON/XML/PDF/ODS), Spreadsheet File, HTML
+      extract, XML, Markdown, JSON, Sort Keys.
 - [ ] **Comms primitives:** Send Email (SMTP), Read Email (IMAP), FTP/SFTP, SSH,
       Execute Command, RSS Read, Webhook Respond
 - [ ] **AI cluster (LangChain-style):** AI Agent, Basic LLM Chain, Q&A/Retrieval Chain,
