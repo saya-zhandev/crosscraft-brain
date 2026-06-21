@@ -243,7 +243,10 @@ func (e *Engine) buildContext(
 			}
 			return map[string]any{}
 		},
-		IDs: schema.ExecIDs{WorkflowID: wf.ID, ExecutionID: executionID, NodeID: node.ID},
+		RunSubWorkflow: func(subCtx context.Context, subWFID string, items []schema.Item) ([]schema.Item, error) {
+				return e.runSubWorkflow(subCtx, subWFID, items)
+			},
+			IDs: schema.ExecIDs{WorkflowID: wf.ID, ExecutionID: executionID, NodeID: node.ID},
 	}
 	return cc, nil
 }

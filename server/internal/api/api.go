@@ -3,11 +3,13 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"html"
 	"io/fs"
 	"net/http"
+	"os"
 	"path"
 	"strings"
 	"time"
@@ -15,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/CrossCraftAI/crosscraft-brain/server/internal/auth"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/credtype"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/engine"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/id"
@@ -26,30 +29,68 @@ import (
 )
 
 // Server bundles the dependencies the handlers need.
+//
+// Store and engine fields use interfaces so tests can inject in-memory doubles
+// without a live Postgres or real execution engine. Production code passes
+// *store.Store and *engine.Engine, which satisfy these interfaces structurally.
 type Server struct {
-	reg   *registry.Registry
-	store *store.Store
-	eng   *engine.Engine
-	llm   *llm.Client
-	oauth *oauth.Service
-	types *credtype.Registry
+	reg    *registry.Registry
+	store  WorkflowStore
+	eng    WorkflowRunner
+	llm    *llm.Client // concrete — the copilot handler tolerates nil (returns error)
+	oauth  *oauth.Service
+	types  *credtype.Registry
+	authSvc *auth.Service
+}
+
+// WorkflowStore is the persistence surface the HTTP handlers need.
+// *store.Store satisfies this.
+type WorkflowStore interface {
+	ListWorkflows(ctx context.Context) ([]store.WorkflowSummary, error)
+	SaveWorkflow(ctx context.Context, wf *schema.Workflow) error
+	LoadWorkflow(ctx context.Context, wfID string) (*schema.Workflow, error)
+	ListActiveWorkflows(ctx context.Context) ([]schema.Workflow, error)
+	ListExecutions(ctx context.Context, workflowID string) ([]schema.ExecutionRecord, error)
+	GetExecutionStatus(ctx context.Context, eid string) (store.ExecStatus, error)
+	GetExecutionSteps(ctx context.Context, executionID string) ([]schema.StepRecord, error)
+	ListCredentials(ctx context.Context) ([]store.CredentialRow, error)
+	CreateCredential(ctx context.Context, ctype, name string, data map[string]any) (store.CredentialRow, error)
+	DeleteCredential(ctx context.Context, cid string) error
+}
+
+// WorkflowRunner is the execution surface the HTTP handlers need.
+// *engine.Engine satisfies this.
+type WorkflowRunner interface {
+	Run(ctx context.Context, wf *schema.Workflow, triggerItems []schema.Item) (engine.RunResult, error)
+	Resume(ctx context.Context, executionID string, payload []schema.Item) (engine.RunResult, error)
 }
 
 // NewRouter wires the /api routes.
-func NewRouter(reg *registry.Registry, st *store.Store, eng *engine.Engine, llmc *llm.Client, staticFS fs.FS, oauthSvc *oauth.Service, types *credtype.Registry) http.Handler {
-	s := &Server{reg: reg, store: st, eng: eng, llm: llmc, oauth: oauthSvc, types: types}
+// st and eng are typed as interfaces so tests can inject in-memory doubles;
+// production passes *store.Store and *engine.Engine, which satisfy them structurally.
+func NewRouter(reg *registry.Registry, st WorkflowStore, eng WorkflowRunner, llmc *llm.Client, staticFS fs.FS, oauthSvc *oauth.Service, types *credtype.Registry, authSvc *auth.Service) http.Handler {
+	s := &Server{reg: reg, store: st, eng: eng, llm: llmc, oauth: oauthSvc, types: types, authSvc: authSvc}
+
+	// Per-IP rate limiters — token-bucket, cleaned of idle entries periodically.
+	copilotLimiter := NewRateLimiter(0.5, 3)  // 30 req/min, burst 3
+	runLimiter := NewRateLimiter(1.0, 5)     // 60 req/min, burst 5
+
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
+	if authSvc != nil {
+		r.Use(authSvc.Middleware)
+	}
 	r.Use(cors)
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/nodes", s.nodes)
+			r.Get("/nodes/{type}/options", s.nodeOptions)
 
 		r.Get("/workflows", s.listWorkflows)
 		r.Post("/workflows", s.createWorkflow)
 		r.Get("/workflows/{id}", s.getWorkflow)
 		r.Put("/workflows/{id}", s.saveWorkflow)
-		r.Post("/workflows/{id}/run", s.run)
+		r.Post("/workflows/{id}/run", runLimiter.MiddlewareFunc(s.run))
 
 		r.Get("/executions", s.listExecutions)
 		r.Get("/executions/{id}", s.getExecution)
@@ -65,7 +106,14 @@ func NewRouter(reg *registry.Registry, st *store.Store, eng *engine.Engine, llmc
 		r.Get("/oauth2/auth-url", s.oauthAuthURL)
 		r.Get("/oauth2/callback", s.oauthCallback)
 
-		r.Post("/copilot", s.copilot)
+		r.Post("/copilot", copilotLimiter.MiddlewareFunc(s.copilot))
+
+		// API key management (requires auth service)
+		if authSvc != nil {
+			r.Get("/keys", s.listKeys)
+			r.Post("/keys", s.createKey)
+			r.Delete("/keys/{id}", s.deleteKey)
+		}
 	})
 
 	// Serve the embedded SPA for everything else, with index.html fallback so
@@ -112,6 +160,30 @@ func spaHandler(dist fs.FS) http.HandlerFunc {
 
 func (s *Server) nodes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.reg.Descriptors())
+}
+
+// nodeOptions serves dynamic dropdown options for a node param.
+// GET /api/nodes/{type}/options?param=name&query=search&credentialId=...
+func (s *Server) nodeOptions(w http.ResponseWriter, r *http.Request) {
+	nodeType := chi.URLParam(r, "type")
+	param := r.URL.Query().Get("param")
+	if param == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("param query is required"))
+		return
+	}
+	query := r.URL.Query().Get("query")
+	credID := r.URL.Query().Get("credentialId")
+	opts, err := s.reg.LoadOptions(r.Context(), nodeType, param, query, credID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if opts == nil {
+		// Node type not found or has no LoadOptions — return empty list, not error,
+		// so the UI degrades gracefully (shows empty picker).
+		opts = []schema.ParamOption{}
+	}
+	writeJSON(w, http.StatusOK, opts)
 }
 
 // ---- workflows -------------------------------------------------------------
@@ -222,7 +294,7 @@ func (s *Server) webhook(w http.ResponseWriter, r *http.Request) {
 	var target *schema.Workflow
 	for i := range wfs {
 		for _, n := range wfs[i].Nodes {
-			if n.Type == "core.webhookTrigger" {
+			if n.Type == "core.webhookTrigger" || n.Type == "core.formTrigger" {
 				if p, _ := n.Params["path"].(string); p == path {
 					target = &wfs[i]
 					break
@@ -556,6 +628,53 @@ func writeOAuthHTML(w http.ResponseWriter, ok bool, msg string) {
 		html.EscapeString(heading), ok)
 }
 
+// ---- API keys (mobile client auth) -----------------------------------------
+
+func (s *Server) listKeys(w http.ResponseWriter, r *http.Request) {
+	if s.authSvc == nil {
+		writeErr(w, http.StatusNotImplemented, fmt.Errorf("auth service not configured"))
+		return
+	}
+	keys, err := s.authSvc.ListKeys(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, keys)
+}
+
+func (s *Server) createKey(w http.ResponseWriter, r *http.Request) {
+	if s.authSvc == nil {
+		writeErr(w, http.StatusNotImplemented, fmt.Errorf("auth service not configured"))
+		return
+	}
+	var body struct {
+		Name string `json:"name"`
+	}
+	_ = readJSON(r, &body)
+	if body.Name == "" {
+		body.Name = "Mobile client"
+	}
+	key, raw, err := s.authSvc.GenerateKey(r.Context(), body.Name)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"key": key, "raw": raw})
+}
+
+func (s *Server) deleteKey(w http.ResponseWriter, r *http.Request) {
+	if s.authSvc == nil {
+		writeErr(w, http.StatusNotImplemented, fmt.Errorf("auth service not configured"))
+		return
+	}
+	if err := s.authSvc.RevokeKey(r.Context(), chi.URLParam(r, "id")); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 // ---- helpers ---------------------------------------------------------------
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -601,9 +720,17 @@ func strOr(v any, def string) string {
 	return def
 }
 
+// corsOrigin reads the allowed origin from CORS_ORIGIN (default "*").
+func getCORSOrigin() string {
+	if v := os.Getenv("CORS_ORIGIN"); v != "" {
+		return v
+	}
+	return "*"
+}
+
 func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Origin", getCORSOrigin())
 		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		if r.Method == http.MethodOptions {

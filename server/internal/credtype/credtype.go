@@ -23,6 +23,9 @@ type OAuth2 struct {
 	// GrantType: "" / "authorization_code" (user redirect flow) or
 	// "client_credentials" (server-to-server; no AuthURL, no user step).
 	GrantType string `json:"grantType,omitempty"`
+	// PKCE enables Proof Key for Code Exchange (RFC 7636, S256) for this type.
+	// Mobile/native clients need this since they cannot keep a client secret.
+	PKCE bool `json:"pkce,omitempty"`
 }
 
 // Type describes a credential type.
@@ -77,6 +80,7 @@ func Default() *Registry {
 				AuthURL:    "https://accounts.google.com/o/oauth2/v2/auth",
 				TokenURL:   "https://oauth2.googleapis.com/token",
 				AuthParams: map[string]string{"access_type": "offline", "prompt": "consent"},
+				PKCE:       true, // mobile clients can't keep client secrets
 			},
 		},
 		Type{
@@ -183,6 +187,15 @@ func Default() *Registry {
 		}},
 		Type{Name: "sentryApi", DisplayName: "Sentry Auth Token", Fields: []Field{
 			{Name: "accessToken", Label: "Auth Token", Type: "password", Required: true},
+		}},
+		// ── Mobile / Push ──────────────────────────────────────────────────────
+		Type{Name: "fcmServiceAccount", DisplayName: "FCM Service Account", Fields: []Field{
+			{Name: "project_id", Label: "Firebase Project ID", Type: "string", Required: true},
+			{Name: "service_account_json", Label: "Service Account JSON Key", Type: "password", Required: true,
+				Placeholder: "Paste the entire service-account JSON key file"},
+		}},
+		Type{Name: "apiKey", DisplayName: "API Key (Mobile Client)", Fields: []Field{
+			{Name: "accessToken", Label: "API Key (cc_...)", Type: "password", Required: true},
 		}},
 	)
 }

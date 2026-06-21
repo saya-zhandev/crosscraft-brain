@@ -2,7 +2,11 @@
 // renders. It is the spine: UI and engine both read from the same registrations.
 package registry
 
-import "github.com/CrossCraftAI/crosscraft-brain/server/internal/schema"
+import (
+	"context"
+
+	"github.com/CrossCraftAI/crosscraft-brain/server/internal/schema"
+)
 
 // Registry is an in-memory map of node type -> definition.
 type Registry struct {
@@ -42,6 +46,16 @@ func (r *Registry) All() []schema.NodeDefinition {
 		out = append(out, d)
 	}
 	return out
+}
+
+// LoadOptions calls the node's LoadOptions function if registered. Returns nil
+// if the node type has no LoadOptions set. Used by GET /api/nodes/{type}/options.
+func (r *Registry) LoadOptions(ctx context.Context, nodeType, param, query, credentialID string) ([]schema.ParamOption, error) {
+	d, ok := r.defs[nodeType]
+	if !ok || d.LoadOptions == nil {
+		return nil, nil
+	}
+	return d.LoadOptions(ctx, param, query, credentialID)
 }
 
 // Descriptors returns the serializable metadata for every node (for GET /api/nodes).

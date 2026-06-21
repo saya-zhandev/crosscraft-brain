@@ -3,7 +3,10 @@
 // byte-for-byte so the existing frontend works unchanged.
 package schema
 
-import "net/http"
+import (
+	"context"
+	"net/http"
+)
 
 // DefaultPort is the implicit input/output port id.
 const DefaultPort = "main"
@@ -93,6 +96,9 @@ type ParamSchema struct {
 	Options        []ParamOption `json:"options,omitempty"`
 	CredentialType string        `json:"credentialType,omitempty"`
 	ShowWhen       *ShowWhen     `json:"showWhen,omitempty"`
+	// HasDynamicOptions signals that this param's options are loaded via
+	// GET /api/nodes/{type}/options?param=... (a searchable remote picker).
+	HasDynamicOptions bool `json:"dynamicOptions,omitempty"`
 }
 
 // RespondSpec is the optional response a suspending node returns to its caller.
@@ -131,11 +137,20 @@ type ExecContext struct {
 	// AuthorizedClient returns an HTTP client authenticated with the given
 	// credential param (e.g. an OAuth2 client) — used by REST/integration nodes.
 	AuthorizedClient func(paramName string) (*http.Client, error)
-	Trigger          []Item
-	Log        func(message string, data any)
-	First      func() map[string]any
-	IDs        ExecIDs
+	// RunSubWorkflow executes another workflow synchronously with the given items
+	// as trigger input and returns the terminal output items. Set by the engine.
+	RunSubWorkflow func(ctx context.Context, workflowID string, items []Item) ([]Item, error)
+	Trigger        []Item
+	Log            func(message string, data any)
+	First          func() map[string]any
+	IDs            ExecIDs
 }
+
+// LoadOptionsFunc is a dynamic dropdown source: given a param name, a search
+// query, and an optional credential ID, return the available choices. Used by
+// the canvas inspector for "resource locator" params (pick a spreadsheet,
+// mailbox, channel, etc.).
+type LoadOptionsFunc func(ctx context.Context, param string, query string, credentialID string) ([]ParamOption, error)
 
 // NodeDefinition is the authoring contract: metadata + an Execute func. A fork
 // adds NodeDefinitions and registers them; the registry serializes the metadata
@@ -152,35 +167,46 @@ type NodeDefinition struct {
 	Credentials []string
 	IsTrigger   bool
 	Execute     func(ctx *ExecContext) (NodeResult, error)
+	// LoadOptions, if set, provides dynamic dropdown options for the given param.
+	// The canvas calls GET /api/nodes/{type}/options?param=...&query=...&credentialId=...
+	LoadOptions LoadOptionsFunc
 }
 
 // NodeDescriptor is the serializable view of a node (no Execute) for the API.
 type NodeDescriptor struct {
-	Type        string        `json:"type"`
-	Label       string        `json:"label"`
-	Group       string        `json:"group"`
-	Icon        string        `json:"icon,omitempty"`
-	Description string        `json:"description,omitempty"`
-	Inputs      []Port        `json:"inputs"`
-	Outputs     []Port        `json:"outputs"`
-	Params      []ParamSchema `json:"params"`
-	Credentials []string      `json:"credentials,omitempty"`
-	IsTrigger   bool          `json:"isTrigger,omitempty"`
+	Type            string        `json:"type"`
+	Label           string        `json:"label"`
+	Group           string        `json:"group"`
+	Icon            string        `json:"icon,omitempty"`
+	Description     string        `json:"description,omitempty"`
+	Inputs          []Port        `json:"inputs"`
+	Outputs         []Port        `json:"outputs"`
+	Params          []ParamSchema `json:"params"`
+	Credentials     []string      `json:"credentials,omitempty"`
+	IsTrigger       bool          `json:"isTrigger,omitempty"`
+	HasLoadOptions  []string      `json:"hasLoadOptions,omitempty"` // param names with dynamic options
 }
 
 // Descriptor returns the serializable metadata for this node.
 func (d NodeDefinition) Descriptor() NodeDescriptor {
+	dynParams := []string{}
+	for _, p := range d.Params {
+		if p.HasDynamicOptions {
+			dynParams = append(dynParams, p.Name)
+		}
+	}
 	return NodeDescriptor{
-		Type:        d.Type,
-		Label:       d.Label,
-		Group:       d.Group,
-		Icon:        d.Icon,
-		Description: d.Description,
-		Inputs:      d.Inputs,
-		Outputs:     d.Outputs,
-		Params:      d.Params,
-		Credentials: d.Credentials,
-		IsTrigger:   d.IsTrigger,
+		Type:           d.Type,
+		Label:          d.Label,
+		Group:          d.Group,
+		Icon:           d.Icon,
+		Description:    d.Description,
+		Inputs:         d.Inputs,
+		Outputs:        d.Outputs,
+		Params:         d.Params,
+		Credentials:    d.Credentials,
+		IsTrigger:      d.IsTrigger,
+		HasLoadOptions: dynParams,
 	}
 }
 

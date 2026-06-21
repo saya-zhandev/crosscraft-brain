@@ -15,6 +15,78 @@ Root cause: React Flow / shadcn props, not Tailwind classes, so the rebrand swee
 
 ---
 
+## Mobile / Client Track — the crosscraft engine as a mobile backend
+
+Rationale: crosscraft's Go binary is a **highly efficient, single-binary workflow
+executor**. iOS/Android apps integrate via the REST API and push notifications;
+the server handles all heavy lifting (OAuth2, API orchestration, AI, file
+processing, scheduling) — the mobile app is a thin UI + triggers.
+
+### Mobile enablers — built 2026-06-21
+
+- [x] **API key auth** — `internal/auth`: bearer-token middleware (`cc_<nanoid>`),
+      SHA-256 hashed, optional enforcement (`AUTH_REQUIRED=true`). Keys created
+      via `POST /api/keys`, listed/deleted via `GET/DELETE /api/keys`. Keys can
+      be embedded in webhook URLs (`?api_key=...`), making mobile-triggered
+      webhooks trivially authenticated.
+- [x] **Push notification node** — `core.pushNotification`: FCM HTTP v1 sender,
+      JWT-assertion token exchange from service-account JSON. Sends to a device
+      token with title/body/data payload. Works on both Android and iOS.
+- [x] **Form trigger** — `core.formTrigger`: like webhook trigger but with
+      required-field validation; designed for mobile form POSTs.
+- [x] **Webhook Respond node** — `core.webhookRespond`: workflow reaches this
+      node, sends a custom HTTP response (JSON body + status) to the caller,
+      then suspends. Enables "POST form → process → respond with result → wait
+      for next action" mobile interaction loops.
+- [x] **FCM credential type** — `fcmServiceAccount` (project_id + service-account
+      JSON key) in `credtype.Default()`.
+- [x] **`db/mobile_schema.sql`** — `api_keys` table with hash index.
+
+### Mobile enablers — next up
+
+- [x] **OAuth2 for mobile** — PKCE flow (`S256`, `code_challenge`) shipped.
+      `credtype.OAuth2.PKCE`, code_verifier generation/challenge, enabled on
+      Google OAuth2.
+- [x] **Load-options** — dynamic dropdown endpoint shipped.
+      `GET /api/nodes/{type}/options?param=...&query=...&credentialId=...`
+- [ ] **Deep-link resume** — mobile apps need to open `crosscraft://resume/{id}`
+      URLs that POST to `/api/resume/{id}`. A mobile-optimized resume endpoint
+      that accepts simpler payloads and returns compact JSON.
+- [ ] **Barcode / QR trigger** — a `core.qrTrigger` that accepts `?code=...`
+      query param (from mobile camera scanner), validates code format, and
+      triggers workflows. Zero-config path: `POST /api/webhook/scan?api_key=...`
+      with `{"code": "..."}` works today; this node adds code-format validation
+      and lookup (SKU, serial, GS1).
+- [ ] **Mobile webhook templates** — pre-built workflow templates for common
+      mobile patterns: "Scan → Lookup → Respond", "Form → Validate → Notify",
+      "Location → Geofence → Alert".
+- [ ] **React Native / Flutter SDK** — thin TypeScript client lib that wraps the
+      REST API + SSE stream + push notification registration. Ships as an npm
+      package (`@crosscraft/mobile-client`).
+- [ ] **SSE push bridge** — when a workflow reaches a `core.pushNotification`
+      node, optionally bridge the SSE stream to the mobile device via FCM data
+      message so the app can update its UI live.
+- [ ] **Offline queue** — mobile-optimized trigger that accepts batched/
+      timestamped items and replays them in order when connectivity returns.
+- [ ] **Biometric / device attestation** — credential type that validates mobile
+      device integrity (iOS DeviceCheck, Android SafetyNet/Play Integrity).
+
+### Reprioritised existing items (mobile-first ordering)
+
+| Priority | Item | Why mobile-first |
+|----------|------|------------------|
+| 1 | OAuth2 PKCE (done) | Mobile apps can't keep client secrets |
+| 2 | Webhook Respond (done) | Mobile needs request → response loops |
+| 3 | Load-options (done) | Mobile pickers (spreadsheets, channels) |
+| 4 | SSE stream optimisation | Live run monitoring on mobile |
+| 5 | Webhook trigger templates | Common mobile interaction patterns |
+| 6 | Error + Execute Workflow (done) | Compose workflows from mobile triggers |
+| 7 | Form Trigger (done) | Mobile form submissions |
+| 8 | Push notifications (done) | Re-engage mobile users |
+| 9 | API key auth (done) | Authenticate mobile clients |
+
+---
+
 ## Integration Nodes Roadmap (Go-native)
 
 Build a first-party catalog of integration nodes, in Go, prioritising the stacks our
@@ -54,7 +126,7 @@ These are prerequisites, not optional. Build once, reuse everywhere.
 - [x] **OAuth2 credential flow** — `internal/oauth`: authorization-code
       (`GET /api/oauth2/auth-url` + `/callback`) **and** client-credentials
       (server-to-server). Refresh + persist back to the encrypted credential blob.
-      _Remaining:_ PKCE.
+      **PKCE shipped** (S256 code challenge, enabled for Google OAuth2).
 - [x] **Credential *types* registry** — `internal/credtype` + `GET /api/credential-types`
       (Google / Microsoft / Adobe IMS / generic OAuth2 / header-auth / Adobe Sign).
 - [x] **Per-service token source** — auto-refreshing `*http.Client` via
@@ -62,21 +134,22 @@ These are prerequisites, not optional. Build once, reuse everywhere.
 - [x] **Declarative REST node framework** — `internal/rest`: data-defined
       resources/operations → `NodeDefinition` (path interpolation, query/JSON body,
       header/OAuth2 auth, retry, response→items, shared-param dedupe, `BaseURLParam`).
-- [~] **Pagination / rate-limit / retry** — 429/5xx retry with `Retry-After` done;
-      cursor / page-token / offset pagination strategies still TODO.
+- [x] **Pagination / rate-limit / retry** — 429/5xx retry with `Retry-After` done.
+      **Cursor / page-token / offset pagination shipped** (`rest.Pagination`, auto
+      page-walking with max-pages guard).
 - [~] **Binary data handling** — in-memory base64 via `Item.Binary` works (Drive media
       upload/download). _Remaining:_ a streaming binary store (disk/S3) keyed by run so
       large files don't buffer in memory.
-- [ ] **Load-options ("resource locator")** — `GET /api/nodes/{type}/options?...` so
-      params can offer dynamic dropdowns (pick a spreadsheet / mailbox / channel).
+- [x] **Load-options ("resource locator")** — `GET /api/nodes/{type}/options?param=...`
+      shipped. `NodeDefinition.LoadOptions` + `ParamSchema.HasDynamicOptions` +
+      `Registry.LoadOptions`; UI gets `hasLoadOptions` in descriptors.
 - [~] **Trigger infra** — **schedule/cron trigger shipped** (`internal/scheduler` +
       `core.scheduleTrigger`, interval + 5-field cron via robfig/cron). _Remaining:_
       generalised **polling triggers** (interval + dedupe cursor) and webhook-trigger
       registration for providers that push (Graph subscriptions, Adobe Sign webhooks);
       durable schedule state across restarts.
-- [ ] **Generic escape hatches** — `core.graphql`, generic **OAuth2 HTTP Request**
-      (auth-aware `http`), and per-vendor "raw API call" nodes (Google/Graph/Adobe)
-      so anything not yet wrapped is still reachable.
+- [~] **Generic escape hatches** — `core.http` already works with header-auth
+      credentials. _Remaining:_ `core.graphql`, per-vendor "raw API call" nodes.
 
 ---
 
@@ -230,20 +303,25 @@ round out the editor so workflows don't need the Code node for everything.
 `code`, `wait` — plus the Phase-4 batch below (all in `nodes/core`, unit-tested).
 
 - [x] **Flow** (shipped): Switch, Filter, Merge (append), Split Out, Aggregate, Limit,
-      Sort, Remove Duplicates, No Operation, Stop & Error.
+      Sort, Remove Duplicates, No Operation, Stop & Error, **Compare Datasets**
+      (`core.compareDatasets`: dual-input, 4 output ports).
       _Remaining:_ Loop Over Items / Split in Batches (needs loop-back semantics in the
-      engine), Compare Datasets.
+      engine).
 - [~] **Triggers:** Schedule/Cron **shipped** (`core.scheduleTrigger`).
-      _Remaining:_ Error Trigger, Execute Workflow (+ trigger), Email (IMAP) Trigger,
-      Form Trigger, Manual chat trigger.
+      **Form Trigger shipped** (`core.formTrigger`), **Error Trigger shipped**
+      (`core.errorTrigger`), **Execute Workflow shipped** (`core.executeWorkflow`
+      + engine `RunSubWorkflow`).
+      _Remaining:_ Email (IMAP) Trigger, Manual chat trigger.
 - [~] **Data:** shipped: Date & Time (now/parse/add/subtract), Crypto (hash / HMAC /
       Base64), Rename Keys, **Extract From File** (CSV/JSON/text), **Convert to File**
       (CSV/JSON), **Compression** (gzip/zip compress+decompress), **HTML Extract**
       (tag-strip), **JSON** (parse/stringify), **Sort Keys**.
       _Remaining:_ Edit Image, Extract From File (XML/PDF/ODS), Spreadsheet File (xlsx), Markdown.
 - [~] **Comms primitives:** **Send Email (SMTP)**, **Execute Command**, **RSS Read**
-      (RSS 2.0 + Atom 1.0) shipped.
-      _Remaining:_ Read Email (IMAP), FTP/SFTP, SSH, Webhook Respond.
+      (RSS 2.0 + Atom 1.0) shipped. **Push Notification (FCM) shipped**
+      (`core.pushNotification`).
+      _Remaining:_ Read Email (IMAP), FTP/SFTP, SSH.
+      **Webhook Respond shipped** (`core.webhookRespond`).
 - [ ] **AI cluster (LangChain-style):** AI Agent, Basic LLM Chain, Q&A/Retrieval Chain,
       Vector Store (Pinecone/PGVector), Embeddings, Memory, Tool nodes, Output Parser,
       Text Splitter, Document Loader  *(builds on existing `nodes/ai` + goja tools)*

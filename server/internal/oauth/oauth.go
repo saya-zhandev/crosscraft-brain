@@ -6,6 +6,8 @@ package oauth
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"net/http"
@@ -36,8 +38,9 @@ type Service struct {
 }
 
 type stateEntry struct {
-	credID  string
-	expires time.Time
+	credID       string
+	codeVerifier string // PKCE code_verifier (RFC 7636); empty if not using PKCE
+	expires      time.Time
 }
 
 // New constructs the service. baseURL is the public base (for the redirect URI).
@@ -89,18 +92,28 @@ func (s *Service) AuthURL(ctx context.Context, credID string) (string, error) {
 		return "", fmt.Errorf("credential is missing clientId")
 	}
 	state := randHex(16)
-	s.putState(state, credID)
 	opts := []oauth2.AuthCodeOption{}
 	for k, v := range spec.AuthParams {
 		opts = append(opts, oauth2.SetAuthURLParam(k, v))
 	}
+	codeVerifier := ""
+	if spec.PKCE {
+		codeVerifier = randHex(32) // 64 hex chars = 256 bits of entropy
+		challenge := pkceChallenge(codeVerifier)
+		opts = append(opts,
+			oauth2.SetAuthURLParam("code_challenge", challenge),
+			oauth2.SetAuthURLParam("code_challenge_method", "S256"),
+		)
+	}
+	s.putState(state, credID, codeVerifier)
 	return cfg.AuthCodeURL(state, opts...), nil
 }
 
 // Exchange completes the flow: validates state, swaps the code for tokens, and
-// stores them on the credential.
+// stores them on the credential. If the credential type uses PKCE, the saved
+// code_verifier is sent as part of the token exchange.
 func (s *Service) Exchange(ctx context.Context, state, code string) error {
-	credID, ok := s.takeState(state)
+	credID, codeVerifier, ok := s.takeState(state)
 	if !ok {
 		return fmt.Errorf("invalid or expired state")
 	}
@@ -115,7 +128,11 @@ func (s *Service) Exchange(ctx context.Context, state, code string) error {
 	if err != nil {
 		return err
 	}
-	tok, err := cfg.Exchange(ctx, code)
+	opts := []oauth2.AuthCodeOption{}
+	if codeVerifier != "" {
+		opts = append(opts, oauth2.SetAuthURLParam("code_verifier", codeVerifier))
+	}
+	tok, err := cfg.Exchange(ctx, code, opts...)
 	if err != nil {
 		return err
 	}
@@ -180,7 +197,7 @@ func (s *Service) persist(ctx context.Context, credID string, tok *oauth2.Token)
 
 // ---- state map -------------------------------------------------------------
 
-func (s *Service) putState(state, credID string) {
+func (s *Service) putState(state, credID, codeVerifier string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now()
@@ -189,19 +206,19 @@ func (s *Service) putState(state, credID string) {
 			delete(s.states, k)
 		}
 	}
-	s.states[state] = stateEntry{credID: credID, expires: now.Add(10 * time.Minute)}
+	s.states[state] = stateEntry{credID: credID, codeVerifier: codeVerifier, expires: now.Add(10 * time.Minute)}
 }
 
-func (s *Service) takeState(state string) (string, bool) {
+func (s *Service) takeState(state string) (credID, codeVerifier string, ok bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	e, ok := s.states[state]
-	if !ok || time.Now().After(e.expires) {
+	e, found := s.states[state]
+	if !found || time.Now().After(e.expires) {
 		delete(s.states, state)
-		return "", false
+		return "", "", false
 	}
 	delete(s.states, state)
-	return e.credID, true
+	return e.credID, e.codeVerifier, true
 }
 
 // ---- persisting token source ----------------------------------------------
@@ -259,4 +276,11 @@ func randHex(n int) string {
 	b := make([]byte, n)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// pkceChallenge returns the BASE64URL-encoded SHA-256 hash of the code_verifier
+// (RFC 7636, Section 4.2). The result has no trailing '=' padding.
+func pkceChallenge(verifier string) string {
+	h := sha256.Sum256([]byte(verifier))
+	return base64.RawURLEncoding.EncodeToString(h[:])
 }

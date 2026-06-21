@@ -28,17 +28,38 @@ type Auth struct {
 	ValueField string // credential data field holding the secret (kind "header")
 }
 
+// PaginationStyle selects the pagination strategy for list endpoints.
+type PaginationStyle string
+
+const (
+	PaginateNone      PaginationStyle = ""
+	PaginateCursor    PaginationStyle = "cursor"
+	PaginatePageToken PaginationStyle = "pageToken"
+	PaginateOffset    PaginationStyle = "offset"
+)
+
+// Pagination configures automatic page-walking for a list operation.
+type Pagination struct {
+	Style         PaginationStyle // cursor, pageToken, or offset
+	NextTokenPath string          // dot-path to the next-page token in the response body
+	TokenParam    string          // query param for the token (default: "pageToken")
+	OffsetParam   string          // query param for the offset (default: "offset")
+	LimitParam    string          // query param for page size (default: "limit")
+	Limit         int             // default page size (0 = use API default)
+}
+
 // Op is one operation (resource + verb).
 type Op struct {
-	Resource  string
-	Name      string
-	Label     string
-	Method    string
-	Path      string            // may contain {param} placeholders
-	Query     map[string]string // query key -> param name, or "=literal"
-	BodyParam string            // param whose JSON value becomes the request body
-	ItemsPath string            // dot-path to an array in the response; "" = whole body
-	Params    []schema.ParamSchema
+	Resource   string
+	Name       string
+	Label      string
+	Method     string
+	Path       string            // may contain {param} placeholders
+	Query      map[string]string // query key -> param name, or "=literal"
+	BodyParam  string            // param whose JSON value becomes the request body
+	ItemsPath  string            // dot-path to an array in the response; "" = whole body
+	Params     []schema.ParamSchema
+	Pagination *Pagination // if set, walk pages and accumulate results
 }
 
 func (o Op) key() string { return o.Resource + ":" + o.Name }
@@ -146,59 +167,30 @@ func (n Node) execute(ctx *schema.ExecContext, byKey map[string]Op) (schema.Node
 			base = v
 		}
 	}
-	u := strings.TrimRight(base, "/") + path
-
-	q := url.Values{}
-	for key, pn := range op.Query {
-		if strings.HasPrefix(pn, "=") {
-			q.Set(key, pn[1:])
-			continue
-		}
-		if v := ctx.Params[pn]; v != nil && fmt.Sprint(v) != "" {
-			q.Set(key, fmt.Sprint(v))
-		}
-	}
-	if len(q) > 0 {
-		u += "?" + q.Encode()
-	}
-
-	var body io.Reader
-	hasBody := false
-	if op.BodyParam != "" {
-		b, _ := json.Marshal(asObject(ctx.RawParam(op.BodyParam)))
-		body = bytes.NewReader(b)
-		hasBody = true
-	}
+	baseURL := strings.TrimRight(base, "/")
 
 	method := strings.ToUpper(op.Method)
 	if method == "" {
 		method = http.MethodGet
 	}
-	if ctx.Log != nil {
-		ctx.Log(method+" "+u, nil)
+
+	var bodyBytes []byte
+	hasBody := false
+	if op.BodyParam != "" {
+		bodyBytes, _ = json.Marshal(asObject(ctx.RawParam(op.BodyParam)))
+		hasBody = true
 	}
 
-	req, err := http.NewRequestWithContext(context.Background(), method, u, body)
-	if err != nil {
-		return schema.NodeResult{}, err
-	}
-	if hasBody {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	req.Header.Set("Accept", "application/json")
-	for k, v := range n.Headers {
-		req.Header.Set(k, v)
-	}
-
+	// Build auth'd client once
 	client := httpClient
-	switch n.Auth.Kind {
-	case "oauth2":
+	headerCredVal := ""
+	if n.Auth.Kind == "oauth2" {
 		c, err := ctx.AuthorizedClient(credParam)
 		if err != nil {
 			return schema.NodeResult{}, err
 		}
 		client = c
-	case "header":
+	} else if n.Auth.Kind == "header" {
 		cred, err := ctx.Credential(credParam)
 		if err != nil {
 			return schema.NodeResult{}, err
@@ -206,25 +198,131 @@ func (n Node) execute(ctx *schema.ExecContext, byKey map[string]Op) (schema.Node
 		if cred == nil {
 			return schema.NodeResult{}, fmt.Errorf("credential not set")
 		}
-		val, _ := cred[n.Auth.ValueField].(string)
-		req.Header.Set(n.Auth.Header, n.Auth.Prefix+val)
+		headerCredVal, _ = cred[n.Auth.ValueField].(string)
 	}
 
-	res, err := doWithRetry(client, req)
-	if err != nil {
-		return schema.NodeResult{}, err
-	}
-	defer res.Body.Close()
-	raw, _ := io.ReadAll(res.Body)
-	if res.StatusCode >= 400 {
-		return schema.NodeResult{}, fmt.Errorf("%s %s -> %d: %s", method, u, res.StatusCode, truncate(string(raw), 500))
+	// Pagination loop
+	allItems := []schema.Item{}
+	maxPages := 50
+	pageQuery := url.Values{}
+	offset := 0
+	for page := 0; page < maxPages; page++ {
+		// Build URL with query params (including pagination tokens)
+		q := url.Values{}
+		for k, v := range pageQuery {
+			q[k] = v
+		}
+		for key, pn := range op.Query {
+			if strings.HasPrefix(pn, "=") {
+				q.Set(key, pn[1:])
+				continue
+			}
+			if v := ctx.Params[pn]; v != nil && fmt.Sprint(v) != "" {
+				q.Set(key, fmt.Sprint(v))
+			}
+		}
+		u := baseURL + path
+		if len(q) > 0 {
+			u += "?" + q.Encode()
+		}
+
+		if ctx.Log != nil {
+			ctx.Log(method+" "+u, nil)
+		}
+
+		reqCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		var reqBody io.Reader
+		if hasBody {
+			reqBody = bytes.NewReader(bodyBytes)
+		}
+		req, err := http.NewRequestWithContext(reqCtx, method, u, reqBody)
+		if err != nil {
+			cancel()
+			return schema.NodeResult{}, err
+		}
+		if hasBody {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		req.Header.Set("Accept", "application/json")
+		for k, v := range n.Headers {
+			req.Header.Set(k, v)
+		}
+		if n.Auth.Kind == "header" && headerCredVal != "" {
+			req.Header.Set(n.Auth.Header, n.Auth.Prefix+headerCredVal)
+		}
+
+		res, err := doWithRetry(client, req)
+		cancel()
+		if err != nil {
+			return schema.NodeResult{}, err
+		}
+		raw, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode >= 400 {
+			return schema.NodeResult{}, fmt.Errorf("%s %s -> %d: %s", method, u, res.StatusCode, truncate(string(raw), 500))
+		}
+
+		items, err := mapResponse(raw, op.ItemsPath)
+		if err != nil {
+			return schema.NodeResult{}, err
+		}
+		allItems = append(allItems, items...)
+
+		// Check for next page
+		if op.Pagination == nil || op.Pagination.Style == PaginateNone {
+			break
+		}
+		nextToken := ""
+		switch op.Pagination.Style {
+		case PaginateCursor, PaginatePageToken:
+			tokenPath := op.Pagination.NextTokenPath
+			if tokenPath == "" {
+				tokenPath = "nextPageToken"
+			}
+			tokenParam := op.Pagination.TokenParam
+			if tokenParam == "" {
+				tokenParam = "pageToken"
+			}
+			if tv := getPath(parseRaw(raw), tokenPath); tv != nil {
+				nextToken = fmt.Sprint(tv)
+			}
+			if nextToken == "" {
+				page = maxPages // stop
+			} else {
+				pageQuery = url.Values{tokenParam: {nextToken}}
+			}
+		case PaginateOffset:
+			if len(items) == 0 {
+				page = maxPages // stop
+			}
+			offset += len(items)
+			offsetParam := op.Pagination.OffsetParam
+			if offsetParam == "" {
+				offsetParam = "offset"
+			}
+			limitParam := op.Pagination.LimitParam
+			if limitParam == "" {
+				limitParam = "limit"
+			}
+			lim := op.Pagination.Limit
+			if lim == 0 {
+				lim = 100
+			}
+			pageQuery = url.Values{offsetParam: {strconv.Itoa(offset)}, limitParam: {strconv.Itoa(lim)}}
+		}
+		if page >= maxPages-1 {
+			break
+		}
 	}
 
-	items, err := mapResponse(raw, op.ItemsPath)
-	if err != nil {
-		return schema.NodeResult{}, err
-	}
-	return schema.NodeResult{Outputs: map[string][]schema.Item{"main": items}}, nil
+	return schema.NodeResult{Outputs: map[string][]schema.Item{"main": allItems}}, nil
+}
+
+// parseRaw unmarshals raw JSON into an any for getPath traversal.
+func parseRaw(raw []byte) any {
+	var v any
+	json.Unmarshal(raw, &v)
+	return v
 }
 
 // doWithRetry retries 429/5xx up to 3 times, honoring Retry-After. The request body

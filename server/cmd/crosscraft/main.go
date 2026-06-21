@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/api"
+	"github.com/CrossCraftAI/crosscraft-brain/server/internal/auth"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/credtype"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/crypto"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/engine"
@@ -37,6 +38,9 @@ import (
 func main() {
 	dsn := env("DATABASE_URL", "postgres://crosscraft:crosscraft@localhost:5433/crosscraft")
 	secret := env("CREDENTIALS_SECRET", strings.Repeat("0", 64))
+	if secret == strings.Repeat("0", 64) {
+		log.Println("⚠ SECURITY: CREDENTIALS_SECRET is the default all-zeros key — credentials are NOT securely encrypted. Set a 64-char hex key in production.")
+	}
 	port := env("PORT", "8080")
 
 	ctx := context.Background()
@@ -81,7 +85,9 @@ func main() {
 	// Fire schedule/cron triggers on active workflows.
 	scheduler.New(st, eng).Start(ctx)
 
-	handler := api.NewRouter(reg, st, eng, llmClient, web.FS(), oauthSvc, credTypes)
+	// API key auth for mobile / third-party clients (optional — keys are opt-in).
+	authSvc := auth.New(pool)
+	handler := api.NewRouter(reg, st, eng, llmClient, web.FS(), oauthSvc, credTypes, authSvc)
 
 	srv := &http.Server{
 		Addr:              ":" + port,
