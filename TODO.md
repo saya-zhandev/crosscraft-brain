@@ -253,6 +253,8 @@ pubsub, translate, language, vision), auth via `golang.org/x/oauth2/google`.
 - [ ] **Microsoft SQL Server** — Execute Query/Insert/Update/Delete: a **DB node** via
       `github.com/microsoft/go-mssqldb` (connection-string credential), parameterized
       queries; sibling to a future generic SQL node.
+-[~] **PostgreSQL** — Execute Query/Insert/Update/Delete: a **DB node** via
+      `github.com/jackc/pgx` (connection-string credential), parameterized queries.      
 - [ ] **Power BI** (REST `api.powerbi.com/v1.0/myorg`) — Dataset: push rows + refresh;
       Report/Dashboard: Get/Get Many. Declarative.
 - [ ] **Azure DevOps** (REST) — Work Item, Pipeline run, Repo/PR: get/create
