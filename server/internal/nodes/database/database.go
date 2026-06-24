@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/schema"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -33,25 +34,51 @@ func PostgresNode() schema.NodeDefinition {
 	}
 }
 
+func resolvePostgresDSN(ctx *schema.ExecContext) (string, error) {
+	if ctx == nil {
+		return "", fmt.Errorf("postgres: missing execution context")
+	}
+	if ctx.Credential != nil {
+		cred, err := ctx.Credential("credential")
+		if err != nil {
+			return "", fmt.Errorf("postgres: failed to get credentials: %w", err)
+		}
+		if len(cred) > 0 {
+			if dsn, ok := cred["dsn"].(string); ok && dsn != "" {
+				return dsn, nil
+			}
+			if dsn, ok := cred["url"].(string); ok && dsn != "" {
+				return dsn, nil
+			}
+			user, _ := cred["user"].(string)
+			password, _ := cred["password"].(string)
+			host, _ := cred["host"].(string)
+			port, _ := cred["port"].(string)
+			dbname, _ := cred["dbname"].(string)
+			if host != "" && dbname != "" {
+				if port == "" {
+					port = "5432"
+				}
+				return fmt.Sprintf("postgres://%s:%s@%s:%s/%s", user, password, host, port, dbname), nil
+			}
+		}
+	}
+	if dsn := os.Getenv("DATABASE_URL"); dsn != "" {
+		return dsn, nil
+	}
+	return "", fmt.Errorf("postgres: no credential or DATABASE_URL configured")
+}
+
 // executePostgres is the execution function for the PostgreSQL node.
 func executePostgres(ctx *schema.ExecContext) (schema.NodeResult, error) {
-	// 1. Get credentials and construct DSN
-	cred, err := ctx.Credential("credential")
+	// 1. Resolve a DSN from the node credential or the app's configured database URL.
+	dsn, err := resolvePostgresDSN(ctx)
 	if err != nil {
-		return schema.NodeResult{}, fmt.Errorf("postgres: failed to get credentials: %w", err)
+		return schema.NodeResult{}, err
 	}
 
-	// Assumes credential 'data' field is a map with keys: user, password, host, port, dbname
-	dsn := fmt.Sprintf("postgres://%s:%s@%s:%s/%s",
-		cred["user"],
-		cred["password"],
-		cred["host"],
-		cred["port"],
-		cred["dbname"],
-	)
-
 	// 2. Connect to the database
-	dbpool, err := pgxpool.New(ctx.Context, dsn)
+	dbpool, err := pgxpool.New(context.Background(), dsn)
 	if err != nil {
 		return schema.NodeResult{}, fmt.Errorf("postgres: unable to connect to database: %w", err)
 	}
@@ -68,7 +95,7 @@ func executePostgres(ctx *schema.ExecContext) (schema.NodeResult, error) {
 	// 4. Execute based on operation
 	switch operation {
 	case "query:many":
-		rows, err := dbpool.Query(ctx.Context, query, queryParams...)
+		rows, err := dbpool.Query(context.Background(), query, queryParams...)
 		if err != nil {
 			return schema.NodeResult{}, fmt.Errorf("postgres query failed: %w", err)
 		}
@@ -84,14 +111,14 @@ func executePostgres(ctx *schema.ExecContext) (schema.NodeResult, error) {
 			for i, fd := range fieldDescs {
 				rowData[string(fd.Name)] = values[i]
 			}
-			out = append(out, schema.Item{Data: rowData})
+			out = append(out, schema.Item{JSON: rowData})
 		}
 		if err := rows.Err(); err != nil {
 			return schema.NodeResult{}, fmt.Errorf("postgres rows error: %w", err)
 		}
 
 	case "query:one":
-		rows, err := dbpool.Query(ctx.Context, query, queryParams...)
+		rows, err := dbpool.Query(context.Background(), query, queryParams...)
 		if err != nil {
 			return schema.NodeResult{}, fmt.Errorf("postgres query failed: %w", err)
 		}
@@ -107,16 +134,16 @@ func executePostgres(ctx *schema.ExecContext) (schema.NodeResult, error) {
 			for i, fd := range fieldDescs {
 				rowData[string(fd.Name)] = values[i]
 			}
-			out = append(out, schema.Item{Data: rowData})
+			out = append(out, schema.Item{JSON: rowData})
 		}
 		rows.Close() // Close after reading one row
 
 	case "exec":
-		cmdTag, err := dbpool.Exec(ctx.Context, query, queryParams...)
+		cmdTag, err := dbpool.Exec(context.Background(), query, queryParams...)
 		if err != nil {
 			return schema.NodeResult{}, fmt.Errorf("postgres exec failed: %w", err)
 		}
-		out = append(out, schema.Item{Data: map[string]any{
+		out = append(out, schema.Item{JSON: map[string]any{
 			"status":        "success",
 			"command":       cmdTag.String(),
 			"rows_affected": cmdTag.RowsAffected(),

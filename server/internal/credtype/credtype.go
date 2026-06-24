@@ -197,5 +197,14 @@ func Default() *Registry {
 		Type{Name: "apiKey", DisplayName: "API Key (Mobile Client)", Fields: []Field{
 			{Name: "accessToken", Label: "API Key (cc_...)", Type: "password", Required: true},
 		}},
+		// ── Database ───────────────────────────────────────────────────────────
+		Type{Name: "postgres", DisplayName: "PostgreSQL", Fields: []Field{
+			{Name: "dsn", Label: "Connection String (optional)", Type: "string", Placeholder: "postgres://user:pass@host:5432/dbname"},
+			{Name: "user", Label: "Username", Type: "string"},
+			{Name: "password", Label: "Password", Type: "password"},
+			{Name: "host", Label: "Host", Type: "string", Placeholder: "localhost"},
+			{Name: "port", Label: "Port", Type: "string", Placeholder: "5432"},
+			{Name: "dbname", Label: "Database Name", Type: "string"},
+		}},
 	)
 }

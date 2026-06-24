@@ -23,6 +23,7 @@ import (
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/nodes/comm"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/nodes/core"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/nodes/crm"
+	"github.com/CrossCraftAI/crosscraft-brain/server/internal/nodes/database"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/nodes/dev"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/nodes/google"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/nodes/microsoft"
@@ -69,7 +70,8 @@ func main() {
 		Register(productivity.Nodes()...).
 		Register(crm.Nodes()...).
 		Register(payments.Nodes()...).
-		Register(dev.Nodes()...)
+		Register(dev.Nodes()...).
+		Register(database.PostgresNode())
 	st := store.New(pool, cipher)
 	eng := engine.New(reg, st)
 	// Bounded async pool: caps concurrently-executing workflows and recovers any
