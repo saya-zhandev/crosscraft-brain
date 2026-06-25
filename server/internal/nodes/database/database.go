@@ -4,9 +4,18 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/schema"
 	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+var (
+	postgresPoolMu    sync.Mutex
+	postgresPoolCache = make(map[string]*pgxpool.Pool)
+	newPostgresPool   = func(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
+		return pgxpool.New(ctx, dsn)
+	}
 )
 
 // PostgresNode returns the definition for the PostgreSQL node.
@@ -69,6 +78,28 @@ func resolvePostgresDSN(ctx *schema.ExecContext) (string, error) {
 	return "", fmt.Errorf("postgres: no credential or DATABASE_URL configured")
 }
 
+func getOrCreatePostgresPool(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
+	postgresPoolMu.Lock()
+	if pool, ok := postgresPoolCache[dsn]; ok {
+		postgresPoolMu.Unlock()
+		return pool, nil
+	}
+	postgresPoolMu.Unlock()
+
+	pool, err := newPostgresPool(ctx, dsn)
+	if err != nil {
+		return nil, err
+	}
+
+	postgresPoolMu.Lock()
+	defer postgresPoolMu.Unlock()
+	if existing, ok := postgresPoolCache[dsn]; ok {
+		return existing, nil
+	}
+	postgresPoolCache[dsn] = pool
+	return pool, nil
+}
+
 // executePostgres is the execution function for the PostgreSQL node.
 func executePostgres(ctx *schema.ExecContext) (schema.NodeResult, error) {
 	// 1. Resolve a DSN from the node credential or the app's configured database URL.
@@ -77,12 +108,11 @@ func executePostgres(ctx *schema.ExecContext) (schema.NodeResult, error) {
 		return schema.NodeResult{}, err
 	}
 
-	// 2. Connect to the database
-	dbpool, err := pgxpool.New(context.Background(), dsn)
+	// 2. Reuse a shared pool for the DSN so connections stay warm across executions.
+	dbpool, err := getOrCreatePostgresPool(context.Background(), dsn)
 	if err != nil {
 		return schema.NodeResult{}, fmt.Errorf("postgres: unable to connect to database: %w", err)
 	}
-	defer dbpool.Close()
 
 	// 3. Get query and parameters
 	query, _ := ctx.Params["query"].(string)

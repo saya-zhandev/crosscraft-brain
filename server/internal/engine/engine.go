@@ -237,6 +237,7 @@ func (e *Engine) buildContext(
 		},
 		Trigger: state.TriggerItems,
 		Log:     func(message string, data any) { *logs = append(*logs, schema.LogEntry{Message: message, Data: data}) },
+		State:   state.State,
 		First: func() map[string]any {
 			if len(inputItems) > 0 && inputItems[0].JSON != nil {
 				return inputItems[0].JSON
@@ -244,9 +245,9 @@ func (e *Engine) buildContext(
 			return map[string]any{}
 		},
 		RunSubWorkflow: func(subCtx context.Context, subWFID string, items []schema.Item) ([]schema.Item, error) {
-				return e.runSubWorkflow(subCtx, subWFID, items)
-			},
-			IDs: schema.ExecIDs{WorkflowID: wf.ID, ExecutionID: executionID, NodeID: node.ID},
+			return e.runSubWorkflow(subCtx, subWFID, items)
+		},
+		IDs: schema.ExecIDs{WorkflowID: wf.ID, ExecutionID: executionID, NodeID: node.ID},
 	}
 	return cc, nil
 }
@@ -355,6 +356,7 @@ func (e *Engine) Run(ctx context.Context, wf *schema.Workflow, triggerItems []sc
 		TriggerItems: triggerItems,
 		NodeOutputs:  map[string]map[string][]schema.Item{},
 		Visited:      []string{},
+		State:        map[string]any{},
 	}
 	if !e.async {
 		return e.drive(ctx, wf, executionID, state, []string{trigger.ID})

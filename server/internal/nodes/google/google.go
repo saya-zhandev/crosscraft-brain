@@ -21,16 +21,20 @@ func str(name, label string, required bool) schema.ParamSchema {
 // Nodes returns the Google node pack wired to the production endpoints.
 func Nodes() []schema.NodeDefinition {
 	return []schema.NodeDefinition{
-		Sheets("https://sheets.googleapis.com/v4").Build(),
-		Gmail("https://gmail.googleapis.com/gmail/v1").Build(),
-		Calendar("https://www.googleapis.com/calendar/v3").Build(),
+		SheetsNode(""), // SDK default: https://sheets.googleapis.com/
+		GmailNode(""), // SDK default: https://gmail.googleapis.com/
+		CalendarNode(""), // SDK default: https://www.googleapis.com/calendar/v3/
 		Drive("https://www.googleapis.com/drive/v3").Build(),
 		DriveUpload(uploadBaseProd),
 		DriveDownload(driveAPIProd),
 	}
 }
 
-// Sheets — Google Sheets v4.
+// Deprecated: Sheets is the original REST-based builder with a limited operation
+// set. Use SheetsNode (sheets.go) instead, which uses the official Go SDK and
+// supports all operations including triggers and dimension deletes.
+//
+// Sheets — Google Sheets v4 (REST, limited ops).
 func Sheets(base string) rest.Node {
 	id := str("spreadsheetId", "Spreadsheet ID", true)
 	rng := str("range", "Range (A1 notation, e.g. Sheet1!A1:C10)", true)
@@ -59,7 +63,12 @@ func Sheets(base string) rest.Node {
 	}
 }
 
-// Gmail — Gmail v1 (read).
+// Deprecated: Gmail is the original REST-based builder with a limited operation
+// set (message list/get, label list). Use GmailNode (gmail.go) instead, which
+// uses the official Go SDK and supports send, reply, drafts, threads, labels
+// CRUD, message/thread modify, and a new-email trigger.
+//
+// Gmail — Gmail v1 (REST, read-only).
 func Gmail(base string) rest.Node {
 	q := schema.ParamSchema{Name: "q", Label: "Search query", Type: "string", Placeholder: "from:me is:unread"}
 	max := schema.ParamSchema{Name: "maxResults", Label: "Max results", Type: "number", Default: 25}
@@ -79,7 +88,12 @@ func Gmail(base string) rest.Node {
 	}
 }
 
-// Calendar — Google Calendar v3.
+// Deprecated: Calendar is the original REST-based builder with a limited operation
+// set (event list/get/create/delete, calendar list). Use CalendarNode (calendar.go)
+// instead, which uses the official Go SDK and supports event update, free/busy
+// query, and a new-event trigger.
+//
+// Calendar — Google Calendar v3 (REST, limited ops).
 func Calendar(base string) rest.Node {
 	cal := schema.ParamSchema{Name: "calendarId", Label: "Calendar ID", Type: "string", Required: true, Default: "primary"}
 	ev := str("eventId", "Event ID", true)

@@ -12,6 +12,7 @@ type RunState struct {
 	TriggerItems []schema.Item                       `json:"triggerItems"`
 	NodeOutputs  map[string]map[string][]schema.Item `json:"nodeOutputs"`
 	Visited      []string                            `json:"visited"`
+	State        map[string]any                      `json:"state,omitempty"`
 }
 
 // LoadedExecution is an execution row plus its (possibly nil) saved run state.

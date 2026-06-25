@@ -143,6 +143,7 @@ type ExecContext struct {
 	Trigger        []Item
 	Log            func(message string, data any)
 	First          func() map[string]any
+	State          map[string]any
 	IDs            ExecIDs
 }
 
@@ -174,17 +175,17 @@ type NodeDefinition struct {
 
 // NodeDescriptor is the serializable view of a node (no Execute) for the API.
 type NodeDescriptor struct {
-	Type            string        `json:"type"`
-	Label           string        `json:"label"`
-	Group           string        `json:"group"`
-	Icon            string        `json:"icon,omitempty"`
-	Description     string        `json:"description,omitempty"`
-	Inputs          []Port        `json:"inputs"`
-	Outputs         []Port        `json:"outputs"`
-	Params          []ParamSchema `json:"params"`
-	Credentials     []string      `json:"credentials,omitempty"`
-	IsTrigger       bool          `json:"isTrigger,omitempty"`
-	HasLoadOptions  []string      `json:"hasLoadOptions,omitempty"` // param names with dynamic options
+	Type           string        `json:"type"`
+	Label          string        `json:"label"`
+	Group          string        `json:"group"`
+	Icon           string        `json:"icon,omitempty"`
+	Description    string        `json:"description,omitempty"`
+	Inputs         []Port        `json:"inputs"`
+	Outputs        []Port        `json:"outputs"`
+	Params         []ParamSchema `json:"params"`
+	Credentials    []string      `json:"credentials,omitempty"`
+	IsTrigger      bool          `json:"isTrigger,omitempty"`
+	HasLoadOptions []string      `json:"hasLoadOptions,omitempty"` // param names with dynamic options
 }
 
 // Descriptor returns the serializable metadata for this node.

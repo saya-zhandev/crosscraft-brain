@@ -1,11 +1,13 @@
 package database
 
 import (
+	"context"
 	"os"
 	"testing"
 
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/credtype"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/schema"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestPostgresNodeDefinition(t *testing.T) {
@@ -61,5 +63,40 @@ func TestExecutePostgresRequiresCredential(t *testing.T) {
 	_, err := executePostgres(ctx)
 	if err == nil {
 		t.Fatal("expected error when credential and DATABASE_URL are missing")
+	}
+}
+
+func TestGetOrCreatePostgresPoolCachesByDSN(t *testing.T) {
+	originalFactory := newPostgresPool
+	postgresPoolMu.Lock()
+	postgresPoolCache = map[string]*pgxpool.Pool{}
+	postgresPoolMu.Unlock()
+	t.Cleanup(func() {
+		newPostgresPool = originalFactory
+		postgresPoolMu.Lock()
+		postgresPoolCache = map[string]*pgxpool.Pool{}
+		postgresPoolMu.Unlock()
+	})
+
+	var createCalls int
+	newPostgresPool = func(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
+		createCalls++
+		return &pgxpool.Pool{}, nil
+	}
+
+	pool1, err := getOrCreatePostgresPool(context.Background(), "postgres://example")
+	if err != nil {
+		t.Fatalf("expected first pool creation to succeed: %v", err)
+	}
+	pool2, err := getOrCreatePostgresPool(context.Background(), "postgres://example")
+	if err != nil {
+		t.Fatalf("expected cached pool reuse to succeed: %v", err)
+	}
+
+	if createCalls != 1 {
+		t.Fatalf("expected one pool creation, got %d", createCalls)
+	}
+	if pool1 != pool2 {
+		t.Fatal("expected the same pool instance to be reused for the same DSN")
 	}
 }

@@ -30,6 +30,7 @@ func (e *Engine) runSubWorkflow(ctx context.Context, wfID string, items []schema
 		TriggerItems: items,
 		NodeOutputs:  map[string]map[string][]schema.Item{},
 		Visited:      []string{},
+		State:        map[string]any{},
 	}
 	res, err := e.drive(ctx, subWF, executionID, state, []string{trigger.ID})
 	if err != nil {

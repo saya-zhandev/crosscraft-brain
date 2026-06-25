@@ -232,7 +232,7 @@ var Telegram = schema.NodeDefinition{
 	},
 }
 
-func telegramCall(url string, body map[string]any) (any, error) {
+func telegramCall(url string, body map[string]any) (any, 2error) {
 	b, _ := json.Marshal(body)
 	resp, err := httpClient.Post(url, "application/json", bytes.NewReader(b))
 	if err != nil {
