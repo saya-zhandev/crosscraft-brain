@@ -6,6 +6,13 @@ No n8n dependency. Fork it to build vertical automation products: add a node pac
 
 Four pillars: **Visual Workflow Editor · Integrations · AI · Transparent Monitoring.**
 
+## Prerequisites
+
+- **[Docker](https://docs.docker.com/get-docker/)** (for Postgres + one-command stack)
+- **[Go](https://go.dev/dl/)** ≥ 1.26 (for local server dev)
+- **[Node.js](https://nodejs.org/)** ≥ 20 + **[pnpm](https://pnpm.io/installation)** ≥ 9.15 (for frontend dev)
+- **Postgres** — the server requires Postgres to be running before it starts. The quickest way is `docker compose up -d postgres` (or `pnpm db:up`), which maps port `5433` on the host. If you use a different Postgres instance, set `DATABASE_URL` in `server/.env`.
+
 ## Architecture
 
 - **`server/`** — Go backend: a topological execution engine with durable suspend/resume, a
@@ -86,6 +93,79 @@ Messages API (Claude, or any compatible endpoint).
 
 Triggers = manual + webhook + resume. Expression engine is intentionally minimal. Auth/RBAC,
 version history, a node marketplace, and cross-restart run recovery are future work.
+
+## Troubleshooting
+
+### Server shows stale/old node operations in the UI
+
+The frontend renders node operations dynamically from `GET /api/nodes`. If you've updated node code
+but the UI still shows old operations, the running server is likely a **stale process** from before
+the code change:
+
+```bash
+# 1. Find and stop any old server process on port 8080
+# Windows (PowerShell):
+Get-Process -Id (Get-NetTCPConnection -LocalPort 8080).OwningProcess -ErrorAction SilentlyContinue | Stop-Process
+# macOS / Linux:
+lsof -ti :8080 | xargs kill
+
+# 2. Start the server fresh
+go -C server run ./cmd/crosscraft
+```
+
+The server now logs `"crosscraft Go backend listening on :8080 (db ok)"` on successful start —
+look for this line to confirm you're running the latest code.
+
+### Port 8080 is already in use
+
+If you see `Port :8080 is already in use`, another instance is running. Either stop it or use a
+different port:
+
+```bash
+go -C server run ./cmd/crosscraft --port 8081
+```
+
+### Postgres is not reachable / server fails to start
+
+The server retries the Postgres connection for **30 seconds** before giving up. If you see
+`Waiting for Postgres...` messages:
+
+```bash
+# Start Postgres via Docker (mapped to host port 5433)
+docker compose up -d postgres
+# or equivalently:
+pnpm db:up
+
+# Verify Postgres is listening
+docker compose ps postgres
+```
+
+If you're using a custom Postgres instance, set `DATABASE_URL` in `server/.env` to point at it:
+
+```
+DATABASE_URL=postgres://user:password@host:port/dbname
+```
+
+### Docker Compose server exits with "Postgres not reachable"
+
+The server container now retries for 30 s (the compose healthcheck gives Postgres a 15 s
+`start_period` before marking it unhealthy). If the server container still fails:
+
+```bash
+docker compose down -v    # reset volumes (re-applies schema on next up)
+docker compose up --build
+```
+
+### Schema / migrations
+
+Core schema is in `db/schema.sql` and is automatically applied when the Postgres data volume
+is first initialized. To re-apply after editing:
+
+```bash
+docker compose down -v     # drop the DB volume
+docker compose up -d postgres
+node --import tsx db/migrate.ts   # or let compose auto-apply it
+```
 
 ## License
 

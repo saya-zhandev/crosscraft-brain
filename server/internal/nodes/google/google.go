@@ -24,9 +24,7 @@ func Nodes() []schema.NodeDefinition {
 		SheetsNode(""), // SDK default: https://sheets.googleapis.com/
 		GmailNode(""), // SDK default: https://gmail.googleapis.com/
 		CalendarNode(""), // SDK default: https://www.googleapis.com/calendar/v3/
-		Drive("https://www.googleapis.com/drive/v3").Build(),
-		DriveUpload(uploadBaseProd),
-		DriveDownload(driveAPIProd),
+		DriveNode(""),
 	}
 }
 

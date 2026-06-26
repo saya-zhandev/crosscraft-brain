@@ -23,7 +23,8 @@ services:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-crosscraft} -d ${DB_NAME:-crosscraft}"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 15
+      start_period: 15s
 
   server:
     build:

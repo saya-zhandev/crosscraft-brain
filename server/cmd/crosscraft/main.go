@@ -4,10 +4,13 @@ package main
 
 import (
 	"context"
+	"flag"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -37,22 +40,46 @@ import (
 )
 
 func main() {
+	// --port flag overrides the PORT env var.
+	portFlag := flag.String("port", "", "HTTP listen port (overrides PORT env var)")
+	flag.Parse()
+
+	port := *portFlag
+	if port == "" {
+		port = env("PORT", "8080")
+	}
+
 	dsn := env("DATABASE_URL", "postgres://crosscraft:crosscraft@localhost:5433/crosscraft")
 	secret := env("CREDENTIALS_SECRET", strings.Repeat("0", 64))
 	if secret == strings.Repeat("0", 64) {
 		log.Println("⚠ SECURITY: CREDENTIALS_SECRET is the default all-zeros key — credentials are NOT securely encrypted. Set a 64-char hex key in production.")
 	}
-	port := env("PORT", "8080")
 
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		log.Fatalf("connect db: %v", err)
+
+	// Retry Postgres connection for up to 30 s — avoids a hard crash when Docker
+	// Compose starts the server before Postgres finishes its first init.
+	var pool *pgxpool.Pool
+	var err error
+	for attempt := 1; attempt <= 30; attempt++ {
+		pool, err = pgxpool.New(ctx, dsn)
+		if err == nil {
+			err = pool.Ping(ctx)
+		}
+		if err == nil {
+			break
+		}
+		if pool != nil {
+			pool.Close()
+			pool = nil
+		}
+		if attempt == 30 {
+			log.Fatalf("Postgres not reachable after 30 attempts (%s): %v\n\nIs Postgres running? Try:\n  docker compose up -d postgres", dsn, err)
+		}
+		log.Printf("Waiting for Postgres at %s... (%d/30)", dsn, attempt)
+		time.Sleep(1 * time.Second)
 	}
 	defer pool.Close()
-	if err := pool.Ping(ctx); err != nil {
-		log.Fatalf("ping db (%s): %v", dsn, err)
-	}
 
 	cipher, err := crypto.New(secret)
 	if err != nil {
@@ -96,8 +123,29 @@ func main() {
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+
+	// Graceful shutdown on Ctrl+C (SIGINT) / SIGTERM.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		sig := <-sigCh
+		log.Printf("Received %v, shutting down gracefully...", sig)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("HTTP server shutdown error: %v", err)
+		}
+	}()
+
 	log.Printf("crosscraft Go backend listening on :%s (db ok)", port)
-	log.Fatal(srv.ListenAndServe())
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if strings.Contains(err.Error(), "address already in use") ||
+			strings.Contains(err.Error(), "Only one usage") {
+			log.Fatalf("Port :%s is already in use. Is another server instance running?\nStop it first, or use: --port 8081  (or set PORT=8081)", port)
+		}
+		log.Fatalf("server: %v", err)
+	}
+	log.Println("Server stopped.")
 }
 
 func env(key, def string) string {

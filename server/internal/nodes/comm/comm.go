@@ -68,23 +68,23 @@ func Slack() rest.Node {
 				Params: []schema.ParamSchema{ch, ts, body}},
 			{Resource: "message", Name: "list", Label: "List Messages (history)", Method: "GET",
 				Path: "/conversations.history", ItemsPath: "messages",
-				Query: map[string]string{"channel": "channel", "limit": "limit"},
+				Query:  map[string]string{"channel": "channel", "limit": "limit"},
 				Params: []schema.ParamSchema{ch, limit}},
 			{Resource: "channel", Name: "list", Label: "List Channels", Method: "GET",
 				Path: "/conversations.list", ItemsPath: "channels",
-				Query: map[string]string{"limit": "limit"},
+				Query:  map[string]string{"limit": "limit"},
 				Params: []schema.ParamSchema{limit}},
 			{Resource: "channel", Name: "get", Label: "Get Channel", Method: "GET",
 				Path: "/conversations.info", ItemsPath: "channel",
-				Query: map[string]string{"channel": "channel"},
+				Query:  map[string]string{"channel": "channel"},
 				Params: []schema.ParamSchema{ch}},
 			{Resource: "user", Name: "list", Label: "List Users", Method: "GET",
 				Path: "/users.list", ItemsPath: "members",
-				Query: map[string]string{"limit": "limit"},
+				Query:  map[string]string{"limit": "limit"},
 				Params: []schema.ParamSchema{limit}},
 			{Resource: "file", Name: "list", Label: "List Files", Method: "GET",
 				Path: "/files.list", ItemsPath: "files",
-				Query: map[string]string{"channel": "channel"},
+				Query:  map[string]string{"channel": "channel"},
 				Params: []schema.ParamSchema{ch}},
 		},
 	}
@@ -109,27 +109,27 @@ func Discord() rest.Node {
 				Path: "/channels/{channelId}/messages", BodyParam: "body",
 				Params: []schema.ParamSchema{chID, body}},
 			{Resource: "message", Name: "get", Label: "Get Message", Method: "GET",
-				Path: "/channels/{channelId}/messages/{messageId}",
+				Path:   "/channels/{channelId}/messages/{messageId}",
 				Params: []schema.ParamSchema{chID, msgID}},
 			{Resource: "message", Name: "list", Label: "List Messages", Method: "GET",
-				Path: "/channels/{channelId}/messages",
-				Query: map[string]string{"limit": "limit"},
+				Path:   "/channels/{channelId}/messages",
+				Query:  map[string]string{"limit": "limit"},
 				Params: []schema.ParamSchema{chID, limit}},
 			{Resource: "message", Name: "delete", Label: "Delete Message", Method: "DELETE",
-				Path: "/channels/{channelId}/messages/{messageId}",
+				Path:   "/channels/{channelId}/messages/{messageId}",
 				Params: []schema.ParamSchema{chID, msgID}},
 			{Resource: "channel", Name: "get", Label: "Get Channel", Method: "GET",
-				Path: "/channels/{channelId}",
+				Path:   "/channels/{channelId}",
 				Params: []schema.ParamSchema{chID}},
 			{Resource: "guild", Name: "get", Label: "Get Guild", Method: "GET",
-				Path: "/guilds/{guildId}",
+				Path:   "/guilds/{guildId}",
 				Params: []schema.ParamSchema{guildID}},
 			{Resource: "guild", Name: "listChannels", Label: "List Guild Channels", Method: "GET",
-				Path: "/guilds/{guildId}/channels",
+				Path:   "/guilds/{guildId}/channels",
 				Params: []schema.ParamSchema{guildID}},
 			{Resource: "guild", Name: "listMembers", Label: "List Guild Members", Method: "GET",
-				Path: "/guilds/{guildId}/members",
-				Query: map[string]string{"limit": "limit"},
+				Path:   "/guilds/{guildId}/members",
+				Query:  map[string]string{"limit": "limit"},
 				Params: []schema.ParamSchema{guildID, limit}},
 		},
 	}
@@ -232,7 +232,7 @@ var Telegram = schema.NodeDefinition{
 	},
 }
 
-func telegramCall(url string, body map[string]any) (any, 2error) {
+func telegramCall(url string, body map[string]any) (any, error) {
 	b, _ := json.Marshal(body)
 	resp, err := httpClient.Post(url, "application/json", bytes.NewReader(b))
 	if err != nil {
@@ -241,8 +241,8 @@ func telegramCall(url string, body map[string]any) (any, 2error) {
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 	var res struct {
-		OK     bool `json:"ok"`
-		Result any  `json:"result"`
+		OK     bool   `json:"ok"`
+		Result any    `json:"result"`
 		Desc   string `json:"description"`
 	}
 	if err := json.Unmarshal(raw, &res); err != nil {
