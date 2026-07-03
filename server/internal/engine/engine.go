@@ -12,14 +12,19 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"runtime/debug"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/expr"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/id"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/registry"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/schema"
 )
+
+// ErrQueueFull is returned by TryEnqueue when the job channel is at capacity.
+var ErrQueueFull = fmt.Errorf("engine queue full")
 
 // Engine executes workflows against a registry and a persistence Store.
 type Engine struct {
@@ -34,6 +39,10 @@ type Engine struct {
 	jobs   chan string
 	mu     sync.Mutex
 	active map[string]bool
+
+	// Graceful shutdown coordination.
+	wg      sync.WaitGroup
+	workers int
 }
 
 // New constructs a synchronous Engine. Call StartWorkers to switch to the
@@ -63,11 +72,19 @@ func (e *Engine) StartWorkers(ctx context.Context, workers, queue int) {
 		queue = 1
 	}
 	e.jobs = make(chan string, queue)
+	e.workers = workers
 	e.async = true
+
 	for i := 0; i < workers; i++ {
+		e.wg.Add(1)
 		go e.worker(ctx)
 	}
-	go e.recoverRunning(ctx)
+
+	e.wg.Add(1)
+	go func() {
+		defer e.wg.Done()
+		e.recoverRunning(ctx)
+	}()
 }
 
 // RunResult is the outcome of a run/resume up to the next terminal or suspend.
@@ -426,9 +443,62 @@ func (e *Engine) Resume(ctx context.Context, executionID string, payload []schem
 
 // ---- async worker pool -----------------------------------------------------
 
+// enqueue blocks until the execution ID is accepted into the job channel.
+// This provides backpressure: callers block when the queue is full.
 func (e *Engine) enqueue(executionID string) { e.jobs <- executionID }
 
+// TryEnqueue attempts to enqueue without blocking. Returns ErrQueueFull if the
+// channel is at capacity, allowing callers (e.g. HTTP handlers) to fail fast
+// with HTTP 503 instead of tying up a request goroutine.
+func (e *Engine) TryEnqueue(executionID string) error {
+	select {
+	case e.jobs <- executionID:
+		return nil
+	default:
+		return ErrQueueFull
+	}
+}
+
+// EnqueueWithTimeout attempts to enqueue, waiting up to the given duration.
+// Returns ErrQueueFull if the channel remains full after the timeout.
+func (e *Engine) EnqueueWithTimeout(ctx context.Context, executionID string, timeout time.Duration) error {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case e.jobs <- executionID:
+		return nil
+	case <-timer.C:
+		return ErrQueueFull
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// QueueDepth returns the current number of pending jobs in the channel.
+func (e *Engine) QueueDepth() int { return len(e.jobs) }
+
+// QueueCap returns the maximum capacity of the job channel.
+func (e *Engine) QueueCap() int { return cap(e.jobs) }
+
+// ActiveWorkers returns the number of configured worker goroutines.
+func (e *Engine) ActiveWorkers() int { return e.workers }
+
 func (e *Engine) worker(ctx context.Context) {
+	defer e.wg.Done()
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("ENGINE PANIC: worker recovered: %v\n%s", r, debug.Stack())
+			// Re-spawn: a worker death degrades throughput. Spawn a replacement
+			// unless the context is already cancelled.
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				e.wg.Add(1)
+				go e.worker(ctx)
+			}
+		}
+	}()
 	for {
 		select {
 		case <-ctx.Done():
@@ -459,11 +529,23 @@ func (e *Engine) release(executionID string) {
 
 // process drives one execution from its persisted state. It unifies fresh runs,
 // resumes, and crash recovery: the ready frontier is recomputed from `visited`.
+// Panics from node Execute functions are recovered so a single buggy node cannot
+// kill a worker goroutine.
 func (e *Engine) process(ctx context.Context, executionID string) {
 	if !e.claim(executionID) {
 		return // another worker already owns it
 	}
 	defer e.release(executionID)
+
+	// Recover from panics in node execution — a buggy node should fail the
+	// execution, not crash the worker.
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("ENGINE PANIC: execution %s: %v\n%s", executionID, r, debug.Stack())
+			// Mark the execution as error so it doesn't stay 'running' forever.
+			_ = e.store.FinishExecution(ctx, executionID, "error")
+		}
+	}()
 
 	exec, err := e.store.LoadExecution(ctx, executionID)
 	if err != nil || exec == nil || exec.Status != "running" {
@@ -522,6 +604,11 @@ func (e *Engine) frontier(wf *schema.Workflow, visited map[string]bool) []string
 // checkpoint; stale 'running' step rows are failed first. The interrupted node may
 // re-run (at-least-once).
 func (e *Engine) recoverRunning(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("ENGINE PANIC: recoverRunning: %v\n%s", r, debug.Stack())
+		}
+	}()
 	ids, err := e.store.ListRunningExecutionIDs(ctx)
 	if err != nil {
 		log.Printf("recovery: list running executions: %v", err)
@@ -531,9 +618,40 @@ func (e *Engine) recoverRunning(ctx context.Context) {
 		log.Printf("recovery: re-enqueuing %d interrupted execution(s)", len(ids))
 	}
 	for _, eid := range ids {
+		// Respect context cancellation during recovery.
+		select {
+		case <-ctx.Done():
+			log.Printf("recovery: context cancelled, stopping after %d enqueues", len(ids))
+			return
+		default:
+		}
 		_ = e.store.FailStaleRunningSteps(ctx, eid)
 		e.enqueue(eid)
 	}
+}
+
+// Shutdown gracefully drains the worker pool. It closes the job channel (so no
+// new work is accepted), waits for all in-flight process() calls to finish, then
+// returns. Callers MUST cancel the context passed to StartWorkers before calling
+// Shutdown so workers exit their select loop.
+func (e *Engine) Shutdown() {
+	if !e.async {
+		return
+	}
+	// Close the jobs channel so workers drain and exit after ctx cancellation.
+	// Only the sender should close; recoverRunning and all Run/Resume callers
+	// are the senders — they stop after ctx is cancelled.
+	close(e.jobs)
+}
+
+// WaitDrain waits for all worker goroutines to exit. The context passed to
+// StartWorkers MUST be cancelled first so workers exit their select loop.
+func (e *Engine) WaitDrain() {
+	if !e.async {
+		return
+	}
+	e.wg.Wait()
+	log.Printf("engine: all %d workers drained", e.workers)
 }
 
 // ---- small helpers ---------------------------------------------------------

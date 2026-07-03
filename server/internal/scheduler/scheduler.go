@@ -8,6 +8,7 @@ package scheduler
 import (
 	"context"
 	"log"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -27,6 +28,7 @@ type Scheduler struct {
 	tick  time.Duration
 	mu    sync.Mutex
 	last  map[string]time.Time
+	wg    sync.WaitGroup
 }
 
 // New builds a scheduler (15s tick — sub-minute interval resolution is limited by it).
@@ -34,10 +36,20 @@ func New(st *store.Store, eng *engine.Engine) *Scheduler {
 	return &Scheduler{store: st, eng: eng, tick: 15 * time.Second, last: map[string]time.Time{}}
 }
 
-// Start launches the polling loop until ctx is cancelled.
+// Start launches the polling loop until ctx is cancelled. Uses a time.Timer
+// (not Ticker) to prevent overlapping fireDue calls if a cycle takes longer
+// than the tick interval — the next cycle is scheduled only after the current
+// one completes.
 func (s *Scheduler) Start(ctx context.Context) {
+	s.wg.Add(1)
 	go func() {
-		t := time.NewTicker(s.tick)
+		defer s.wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("SCHEDULER PANIC: recovered: %v\n%s", r, debug.Stack())
+			}
+		}()
+		t := time.NewTimer(s.tick)
 		defer t.Stop()
 		for {
 			select {
@@ -45,9 +57,18 @@ func (s *Scheduler) Start(ctx context.Context) {
 				return
 			case <-t.C:
 				s.fireDue(ctx, time.Now())
+				// Reset after fireDue completes, preventing overlap.
+				t.Reset(s.tick)
 			}
 		}
 	}()
+}
+
+// WaitDrain waits for the scheduler goroutine to exit. The context passed to
+// Start MUST be cancelled first.
+func (s *Scheduler) WaitDrain() {
+	s.wg.Wait()
+	log.Println("scheduler: drained")
 }
 
 func (s *Scheduler) fireDue(ctx context.Context, now time.Time) {
