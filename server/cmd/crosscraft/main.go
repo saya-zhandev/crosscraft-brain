@@ -7,8 +7,10 @@ import (
 	"flag"
 	"log"
 	"net/http"
+	_ "net/http/pprof" // Register pprof handlers on default mux
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -62,7 +64,10 @@ func main() {
 		log.Println("⚠ SECURITY: CREDENTIALS_SECRET is the default all-zeros key — credentials are NOT securely encrypted. Set a 64-char hex key in production.")
 	}
 
-	ctx := context.Background()
+	// signal.NotifyContext cancels ctx on SIGINT/SIGTERM, giving all subsystems
+	// a unified shutdown signal.
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
 
 	// Retry Postgres connection for up to 30 s — avoids a hard crash when Docker
 	// Compose starts the server before Postgres finishes its first init.
@@ -115,8 +120,10 @@ func main() {
 		Register(storage.Nodes()...)
 	st := store.New(pool, cipher)
 	eng := engine.New(reg, st)
+
 	// Bounded async pool: caps concurrently-executing workflows and recovers any
 	// runs left 'running' by a previous process (durability across restart).
+	// Uses the signal-aware ctx so workers drain on SIGINT/SIGTERM.
 	eng.StartWorkers(ctx, 8, 256)
 
 	// Credential types + OAuth2 flow. The engine uses the oauth service to mint
@@ -126,7 +133,8 @@ func main() {
 	eng.SetClientProvider(oauthSvc)
 
 	// Fire schedule/cron triggers on active workflows.
-	scheduler.New(st, eng).Start(ctx)
+	sch := scheduler.New(st, eng)
+	sch.Start(ctx)
 
 	// API key auth for mobile / third-party clients (optional — keys are opt-in).
 	authSvc := auth.New(pool)
@@ -138,28 +146,44 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	// Graceful shutdown on Ctrl+C (SIGINT) / SIGTERM.
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	// Run HTTP server in a goroutine so shutdown is coordinated below.
 	go func() {
-		sig := <-sigCh
-		log.Printf("Received %v, shutting down gracefully...", sig)
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if err := srv.Shutdown(shutdownCtx); err != nil {
-			log.Printf("HTTP server shutdown error: %v", err)
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("HTTP SERVER PANIC: %v\n%s", r, debug.Stack())
+			}
+		}()
+		log.Printf("crosscraft Go backend listening on :%s (db ok)", port)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			if strings.Contains(err.Error(), "address already in use") ||
+				strings.Contains(err.Error(), "Only one usage") {
+				log.Fatalf("Port :%s is already in use. Is another server instance running?\nStop it first, or use: --port 8081  (or set PORT=8081)", port)
+			}
+			log.Fatalf("server: %v", err)
 		}
 	}()
 
-	log.Printf("crosscraft Go backend listening on :%s (db ok)", port)
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		if strings.Contains(err.Error(), "address already in use") ||
-			strings.Contains(err.Error(), "Only one usage") {
-			log.Fatalf("Port :%s is already in use. Is another server instance running?\nStop it first, or use: --port 8081  (or set PORT=8081)", port)
-		}
-		log.Fatalf("server: %v", err)
+	// ── Graceful shutdown sequence ──────────────────────────────────────────
+	// Wait for shutdown signal (SIGINT/SIGTERM propagated via NotifyContext).
+	<-ctx.Done()
+	log.Println("Shutdown signal received — draining...")
+
+	// 1. Stop accepting new HTTP requests.
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("HTTP server shutdown error: %v", err)
 	}
-	log.Println("Server stopped.")
+	log.Println("HTTP server stopped")
+
+	// 2. Signal engine workers to stop (ctx already cancelled) and drain.
+	eng.Shutdown()
+	eng.WaitDrain()
+
+	// 3. Drain scheduler.
+	sch.WaitDrain()
+
+	log.Println("Server stopped cleanly.")
 }
 
 func env(key, def string) string {
