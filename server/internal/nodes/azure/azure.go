@@ -23,7 +23,6 @@ func Nodes() []schema.NodeDefinition {
 	return []schema.NodeDefinition{
 		BlobStorage("https://{accountName}.blob.core.windows.net").Build(),
 		CosmosDB("https://{accountName}.documents.azure.com").Build(),
-		MSSQLNode(),
 		PowerBI("https://api.powerbi.com/v1.0/myorg").Build(),
 		DevOps("https://dev.azure.com").Build(),
 		OpenAI("https://{resourceName}.openai.azure.com").Build(),

@@ -248,12 +248,6 @@ func Default() *Registry {
 			{Name: "accountName", Label: "Account Name (or endpoint)", Type: "string", Required: true},
 			{Name: "accessKey", Label: "Primary Master Key", Type: "password", Required: true},
 		}},
-		Type{Name: "mssql", DisplayName: "Microsoft SQL Server", Fields: []Field{
-			{Name: "server", Label: "Server (host:port)", Type: "string", Required: true, Placeholder: "localhost:1433"},
-			{Name: "database", Label: "Database Name", Type: "string", Required: true},
-			{Name: "user", Label: "Username", Type: "string", Required: true},
-			{Name: "password", Label: "Password", Type: "password", Required: true},
-		}},
 		Type{Name: "azurePowerBI", DisplayName: "Azure Power BI (OAuth2)", Fields: clientFields,
 			OAuth2: &OAuth2{
 				AuthURL:    "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
@@ -308,34 +302,6 @@ func Default() *Registry {
 		Type{Name: "graphqlApi", DisplayName: "GraphQL (Bearer Token / API Key)", Fields: []Field{
 			{Name: "accessToken", Label: "Bearer Token", Type: "password"},
 			{Name: "apiKey", Label: "API Key", Type: "password"},
-		}},
-		Type{Name: "grpcApi", DisplayName: "gRPC (TLS / Token)", Fields: []Field{
-			{Name: "accessToken", Label: "Bearer Token", Type: "password"},
-			{Name: "certFile", Label: "Client Certificate File", Type: "string"},
-			{Name: "keyFile", Label: "Client Key File", Type: "string"},
-		}},
-		Type{Name: "soapApi", DisplayName: "SOAP (Basic Auth / Bearer Token)", Fields: []Field{
-			{Name: "username", Label: "Username", Type: "string"},
-			{Name: "password", Label: "Password", Type: "password"},
-			{Name: "accessToken", Label: "Bearer Token", Type: "password"},
-		}},
-		Type{Name: "mqttApi", DisplayName: "MQTT (Username / Password / TLS)", Fields: []Field{
-			{Name: "username", Label: "Username", Type: "string"},
-			{Name: "password", Label: "Password", Type: "password"},
-			{Name: "certFile", Label: "Client Certificate File", Type: "string"},
-			{Name: "keyFile", Label: "Client Key File", Type: "string"},
-			{Name: "caFile", Label: "CA Certificate File", Type: "string"},
-		}},
-		Type{Name: "amqpApi", DisplayName: "AMQP / RabbitMQ (Credentials)", Fields: []Field{
-			{Name: "username", Label: "Username", Type: "string", Required: true, Placeholder: "guest"},
-			{Name: "password", Label: "Password", Type: "password", Required: true, Placeholder: "guest"},
-			{Name: "vhost", Label: "Virtual Host", Type: "string", Placeholder: "/"},
-		}},
-		Type{Name: "kafkaApi", DisplayName: "Kafka (SASL / TLS)", Fields: []Field{
-			{Name: "username", Label: "SASL Username", Type: "string"},
-			{Name: "password", Label: "SASL Password", Type: "password"},
-			{Name: "certFile", Label: "Client Certificate File", Type: "string"},
-			{Name: "keyFile", Label: "Client Key File", Type: "string"},
 		}},
 		Type{Name: "natsApi", DisplayName: "NATS (JWT / NKey / Basic Auth)", Fields: []Field{
 			{Name: "jwt", Label: "JWT Token", Type: "password"},
@@ -398,14 +364,6 @@ func Default() *Registry {
 			{Name: "port", Label: "Port", Type: "string", Placeholder: "6379"},
 			{Name: "password", Label: "Password", Type: "password"},
 			{Name: "db", Label: "Database Number", Type: "string", Placeholder: "0"},
-		}},
-		Type{Name: "snowflakeApi", DisplayName: "Snowflake", Fields: []Field{
-			{Name: "account", Label: "Account Identifier", Type: "string", Required: true, Placeholder: "myorg-abc123"},
-			{Name: "user", Label: "Username", Type: "string", Required: true},
-			{Name: "password", Label: "Password", Type: "password", Required: true},
-			{Name: "warehouse", Label: "Warehouse", Type: "string", Placeholder: "COMPUTE_WH"},
-			{Name: "database", Label: "Database Name", Type: "string"},
-			{Name: "schema", Label: "Schema", Type: "string", Placeholder: "PUBLIC"},
 		}},
 		Type{Name: "supabaseApi", DisplayName: "Supabase", Fields: []Field{
 			{Name: "url", Label: "Project URL", Type: "string", Required: true, Placeholder: "https://xxxxx.supabase.co"},

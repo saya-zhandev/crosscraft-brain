@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/schema"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -53,7 +56,6 @@ func Nodes() []schema.NodeDefinition {
 		MongoNode(),
 		MySQLNode(),
 		RedisNode(),
-		SnowflakeNode(),
 		SupabaseNode(),
 	}
 }
@@ -108,7 +110,13 @@ func resolvePostgresDSN(ctx *schema.ExecContext) (string, error) {
 				if port == "" {
 					port = "5432"
 				}
-				return fmt.Sprintf("postgres://%s:%s@%s:%s/%s", user, password, host, port, dbname), nil
+				u := &url.URL{
+					Scheme: "postgres",
+					User:   url.UserPassword(user, password),
+					Host:   net.JoinHostPort(host, port),
+					Path:   dbname,
+				}
+				return u.String(), nil
 			}
 		}
 	}
@@ -134,10 +142,31 @@ func getOrCreatePostgresPool(ctx context.Context, dsn string) (*pgxpool.Pool, er
 	postgresPoolMu.Lock()
 	defer postgresPoolMu.Unlock()
 	if existing, ok := postgresPoolCache[dsn]; ok {
+		pool.Close() // Another goroutine created one first
 		return existing, nil
 	}
 	postgresPoolCache[dsn] = pool
 	return pool, nil
+}
+
+// ClosePool closes and removes a cached pool for the given DSN.
+func ClosePool(dsn string) {
+	postgresPoolMu.Lock()
+	defer postgresPoolMu.Unlock()
+	if pool, ok := postgresPoolCache[dsn]; ok {
+		pool.Close()
+		delete(postgresPoolCache, dsn)
+	}
+}
+
+// CleanupPools closes all cached database pools. Call during graceful shutdown.
+func CleanupPools() {
+	postgresPoolMu.Lock()
+	defer postgresPoolMu.Unlock()
+	for dsn, pool := range postgresPoolCache {
+		pool.Close()
+		delete(postgresPoolCache, dsn)
+	}
 }
 
 // executePostgres is the execution function for the PostgreSQL node.
@@ -148,8 +177,12 @@ func executePostgres(ctx *schema.ExecContext) (schema.NodeResult, error) {
 		return schema.NodeResult{}, err
 	}
 
-	// 2. Reuse a shared pool for the DSN so connections stay warm across executions.
-	dbpool, err := getOrCreatePostgresPool(context.Background(), dsn)
+	// 2. Create a context with a configurable timeout (default 30s) for all queries.
+	queryCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// 3. Reuse a shared pool for the DSN so connections stay warm across executions.
+	dbpool, err := getOrCreatePostgresPool(queryCtx, dsn)
 	if err != nil {
 		return schema.NodeResult{}, fmt.Errorf("postgres: unable to connect to database: %w", err)
 	}
@@ -165,7 +198,7 @@ func executePostgres(ctx *schema.ExecContext) (schema.NodeResult, error) {
 	// 4. Execute based on operation
 	switch operation {
 	case "query:many":
-		rows, err := dbpool.Query(context.Background(), query, queryParams...)
+		rows, err := dbpool.Query(queryCtx, query, queryParams...)
 		if err != nil {
 			return schema.NodeResult{}, fmt.Errorf("postgres query failed: %w", err)
 		}
@@ -188,7 +221,7 @@ func executePostgres(ctx *schema.ExecContext) (schema.NodeResult, error) {
 		}
 
 	case "query:one":
-		rows, err := dbpool.Query(context.Background(), query, queryParams...)
+		rows, err := dbpool.Query(queryCtx, query, queryParams...)
 		if err != nil {
 			return schema.NodeResult{}, fmt.Errorf("postgres query failed: %w", err)
 		}
@@ -209,7 +242,7 @@ func executePostgres(ctx *schema.ExecContext) (schema.NodeResult, error) {
 		rows.Close() // Close after reading one row
 
 	case "exec":
-		cmdTag, err := dbpool.Exec(context.Background(), query, queryParams...)
+		cmdTag, err := dbpool.Exec(queryCtx, query, queryParams...)
 		if err != nil {
 			return schema.NodeResult{}, fmt.Errorf("postgres exec failed: %w", err)
 		}

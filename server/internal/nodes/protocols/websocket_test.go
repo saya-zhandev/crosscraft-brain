@@ -65,8 +65,8 @@ func TestWebSocketFrameEncoding(t *testing.T) {
 
 func TestProtocolsNodeCount(t *testing.T) {
 	nodes := Nodes()
-	if len(nodes) != 8 {
-		t.Fatalf("expected 8 protocol nodes, got %d", len(nodes))
+	if len(nodes) != 3 {
+		t.Fatalf("expected 3 protocol nodes, got %d", len(nodes))
 	}
 }
 

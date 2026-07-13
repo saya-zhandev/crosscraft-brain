@@ -183,14 +183,14 @@ func TestMongoAggregateRequiresPipeline(t *testing.T) {
 
 func TestDatabaseNodeCount(t *testing.T) {
 	nodes := Nodes()
-	if len(nodes) != 6 {
-		t.Fatalf("expected 6 database nodes, got %d", len(nodes))
+	if len(nodes) != 5 {
+		t.Fatalf("expected 5 database nodes, got %d", len(nodes))
 	}
 	types := make(map[string]bool)
 	for _, n := range nodes {
 		types[n.Type] = true
 	}
-	for _, want := range []string{"database.postgres", "database.mongodb", "database.mysql", "database.redis", "database.snowflake", "database.supabase"} {
+	for _, want := range []string{"database.postgres", "database.mongodb", "database.mysql", "database.redis", "database.supabase"} {
 		if !types[want] {
 			t.Fatalf("expected node type %q in Nodes()", want)
 		}

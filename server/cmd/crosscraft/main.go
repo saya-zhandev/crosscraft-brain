@@ -7,7 +7,7 @@ import (
 	"flag"
 	"log"
 	"net/http"
-	_ "net/http/pprof" // Register pprof handlers on default mux
+	_"net/http/pprof" // Register pprof handlers on default mux
 	"os"
 	"os/signal"
 	"runtime/debug"
@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/reflection"
 
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/api"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/auth"
@@ -23,6 +25,8 @@ import (
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/crypto"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/engine"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/llm"
+	"github.com/CrossCraftAI/crosscraft-brain/server/internal/mobile"
+	crosscraft "github.com/CrossCraftAI/crosscraft-brain/server/internal/mobile/gen"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/nodes/accounting"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/nodes/adobe"
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/nodes/ai"
@@ -48,6 +52,20 @@ import (
 	"github.com/CrossCraftAI/crosscraft-brain/server/web"
 )
 
+// sanitizeDSN redacts the password from a PostgreSQL connection string for logging.
+// postgres://user:password@host:port/db -> postgres://user:****@host:port/db
+func sanitizeDSN(dsn string) string {
+	if idx := strings.Index(dsn, "@"); idx > 0 {
+		prefix := dsn[:idx]
+		if colonIdx := strings.LastIndex(prefix, ":"); colonIdx > 0 {
+			if slashIdx := strings.Index(prefix, "//"); slashIdx >= 0 && slashIdx < colonIdx {
+				return dsn[:colonIdx+1] + "****" + dsn[idx:]
+			}
+		}
+	}
+	return "postgres://****@..."
+}
+
 func main() {
 	// --port flag overrides the PORT env var.
 	portFlag := flag.String("port", "", "HTTP listen port (overrides PORT env var)")
@@ -61,7 +79,7 @@ func main() {
 	dsn := env("DATABASE_URL", "postgres://crosscraft:crosscraft@localhost:5433/crosscraft")
 	secret := env("CREDENTIALS_SECRET", strings.Repeat("0", 64))
 	if secret == strings.Repeat("0", 64) {
-		log.Println("⚠ SECURITY: CREDENTIALS_SECRET is the default all-zeros key — credentials are NOT securely encrypted. Set a 64-char hex key in production.")
+		log.Println("WARNING: CREDENTIALS_SECRET is the default all-zeros key -- credentials are NOT securely encrypted. Set a 64-char hex key in production.")
 	}
 
 	// signal.NotifyContext cancels ctx on SIGINT/SIGTERM, giving all subsystems
@@ -69,7 +87,7 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	// Retry Postgres connection for up to 30 s — avoids a hard crash when Docker
+	// Retry Postgres connection for up to 30 s -- avoids a hard crash when Docker
 	// Compose starts the server before Postgres finishes its first init.
 	var pool *pgxpool.Pool
 	var err error
@@ -86,9 +104,9 @@ func main() {
 			pool = nil
 		}
 		if attempt == 30 {
-			log.Fatalf("Postgres not reachable after 30 attempts (%s): %v\n\nIs Postgres running? Try:\n  docker compose up -d postgres", dsn, err)
+			log.Fatalf("Postgres not reachable after 30 attempts (%s): %v\n\nIs Postgres running? Try:\n  docker compose up -d postgres", sanitizeDSN(dsn), err)
 		}
-		log.Printf("Waiting for Postgres at %s... (%d/30)", dsn, attempt)
+		log.Printf("Waiting for Postgres at %s... (%d/30)", sanitizeDSN(dsn), attempt)
 		time.Sleep(1 * time.Second)
 	}
 	defer pool.Close()
@@ -136,14 +154,43 @@ func main() {
 	sch := scheduler.New(st, eng)
 	sch.Start(ctx)
 
-	// API key auth for mobile / third-party clients (optional — keys are opt-in).
+	// API key auth for mobile / third-party clients (optional -- keys are opt-in).
 	authSvc := auth.New(pool)
 	handler := api.NewRouter(reg, st, eng, llmClient, web.FS(), oauthSvc, credTypes, authSvc)
 
+	// gRPC server for mobile clients -- multiplexed on the same port.
+	// gRPC requests carry Content-Type: application/grpc and HTTP/2, so the
+	// multiplexer routes them to the gRPC server; everything else goes to chi.
+	grpcServer := grpc.NewServer()
+	mobileSvc := mobile.NewServer(st, eng, authSvc, pool)
+	crosscraft.RegisterCrossCraftMobileServer(grpcServer, mobileSvc)
+	reflection.Register(grpcServer)
+
+	restHandler := handler
+	handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Route pprof to http.DefaultServeMux where net/http/pprof registered its
+		// handlers via init(). This comes first so pprof bypasses auth middleware.
+		if strings.HasPrefix(r.URL.Path, "/debug/pprof") {
+			http.DefaultServeMux.ServeHTTP(w, r)
+			return
+		}
+		if r.ProtoMajor == 2 && strings.Contains(r.Header.Get("Content-Type"), "application/grpc") {
+			grpcServer.ServeHTTP(w, r)
+			return
+		}
+		restHandler.ServeHTTP(w, r)
+	})
+	log.Println("pprof endpoints available at /debug/pprof/")
+	log.Println("gRPC mobile API registered on :" + port)
+
+	h2cProtocols := &http.Protocols{}
+	h2cProtocols.SetHTTP1(true)
+	h2cProtocols.SetUnencryptedHTTP2(true)
 	srv := &http.Server{
 		Addr:              ":" + port,
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
+		Protocols:         h2cProtocols,
 	}
 
 	// Run HTTP server in a goroutine so shutdown is coordinated below.
@@ -163,10 +210,10 @@ func main() {
 		}
 	}()
 
-	// ── Graceful shutdown sequence ──────────────────────────────────────────
+	// Graceful shutdown sequence
 	// Wait for shutdown signal (SIGINT/SIGTERM propagated via NotifyContext).
 	<-ctx.Done()
-	log.Println("Shutdown signal received — draining...")
+	log.Println("Shutdown signal received -- draining...")
 
 	// 1. Stop accepting new HTTP requests.
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -176,11 +223,15 @@ func main() {
 	}
 	log.Println("HTTP server stopped")
 
-	// 2. Signal engine workers to stop (ctx already cancelled) and drain.
+	// 2. Stop gRPC server gracefully.
+	grpcServer.GracefulStop()
+	log.Println("gRPC server stopped")
+
+	// 3. Signal engine workers to stop (ctx already cancelled) and drain.
 	eng.Shutdown()
 	eng.WaitDrain()
 
-	// 3. Drain scheduler.
+	// 4. Drain scheduler.
 	sch.WaitDrain()
 
 	log.Println("Server stopped cleanly.")

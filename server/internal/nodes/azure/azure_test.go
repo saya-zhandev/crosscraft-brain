@@ -35,48 +35,6 @@ func TestCosmosDBNode(t *testing.T) {
 	}
 }
 
-func TestMSSQLNode(t *testing.T) {
-	def := MSSQLNode()
-	if def.Type != "azure.mssql" {
-		t.Fatalf("unexpected type: %s", def.Type)
-	}
-	if len(def.Params) < 3 {
-		t.Fatalf("expected at least 3 params, got %d", len(def.Params))
-	}
-}
-
-func TestMSSQLExec(t *testing.T) {
-	ctx := &schema.ExecContext{
-		Params:   map[string]any{"operation": "query:many", "query": "SELECT 1"},
-		RawParam: func(n string) any { return nil },
-		Credential: func(string) (map[string]any, error) {
-			return map[string]any{"server": "localhost:1433", "database": "testdb", "user": "sa", "password": "pass"}, nil
-		},
-		Log: func(string, any) {},
-	}
-	res, err := MSSQLNode().Execute(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := res.Outputs["main"]
-	if len(out) != 1 || out[0].JSON["status"] != "driver_not_loaded" {
-		t.Fatalf("expected driver_not_loaded status, got %+v", out)
-	}
-}
-
-func TestMSSQLMissingCredential(t *testing.T) {
-	ctx := &schema.ExecContext{
-		Params:     map[string]any{"operation": "query:many"},
-		RawParam:   func(n string) any { return nil },
-		Credential: func(string) (map[string]any, error) { return map[string]any{}, nil },
-		Log:        func(string, any) {},
-	}
-	_, err := MSSQLNode().Execute(ctx)
-	if err == nil {
-		t.Fatal("expected error for missing server/database")
-	}
-}
-
 func TestPowerBINode(t *testing.T) {
 	def := PowerBI("https://api.powerbi.com/v1.0/myorg").Build()
 	ops := collectOps(def)
@@ -112,15 +70,15 @@ func TestOpenAINode(t *testing.T) {
 
 func TestAzureNodesRegistration(t *testing.T) {
 	nodes := Nodes()
-	if len(nodes) != 6 {
-		t.Fatalf("expected 6 Azure nodes, got %d", len(nodes))
+	if len(nodes) != 5 {
+		t.Fatalf("expected 5 Azure nodes, got %d", len(nodes))
 	}
 	names := map[string]bool{}
 	for _, n := range nodes {
 		names[n.Type] = true
 	}
 	for _, want := range []string{
-		"azure.blobStorage", "azure.cosmos", "azure.mssql",
+		"azure.blobStorage", "azure.cosmos",
 		"azure.powerbi", "azure.devops", "azure.openai",
 	} {
 		if !names[want] {
@@ -131,8 +89,8 @@ func TestAzureNodesRegistration(t *testing.T) {
 
 func TestAzureSharedKeySigning(t *testing.T) {
 	// Verify the signing function exists and is callable
-	_ = azureSignRequest
-	_ = azureSignRequest
+	_ = AzureSignRequest
+	_ = NewSignedTransport
 }
 
 func TestCosmosSigning(t *testing.T) {
