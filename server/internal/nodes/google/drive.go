@@ -30,6 +30,9 @@ func getDriveService(ctx *schema.ExecContext, base string) (*drive.Service, erro
 		return nil, fmt.Errorf("drive: authorized client: %w", err)
 	}
 	credID, _ := ctx.Params["credential"].(string)
+	if credID == "" {
+		return nil, fmt.Errorf("drive: credential is required")
+	}
 	cacheKey := credID + "|" + base
 
 	// Fast path: read under lock.

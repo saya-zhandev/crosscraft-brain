@@ -40,15 +40,12 @@ func New(st *store.Store, eng *engine.Engine) *Scheduler {
 // (not Ticker) to prevent overlapping fireDue calls if a cycle takes longer
 // than the tick interval — the next cycle is scheduled only after the current
 // one completes.
+// Panic recovery is inside the for loop so a single fireDue panic does not
+// kill the scheduler goroutine.
 func (s *Scheduler) Start(ctx context.Context) {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("SCHEDULER PANIC: recovered: %v\n%s", r, debug.Stack())
-			}
-		}()
 		t := time.NewTimer(s.tick)
 		defer t.Stop()
 		for {
@@ -56,7 +53,16 @@ func (s *Scheduler) Start(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				s.fireDue(ctx, time.Now())
+				// Run fireDue in a closure so panics are recovered
+				// per-cycle, keeping the scheduler alive.
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							log.Printf("SCHEDULER PANIC: recovered: %v\n%s", r, debug.Stack())
+						}
+					}()
+					s.fireDue(ctx, time.Now())
+				}()
 				// Reset after fireDue completes, preventing overlap.
 				t.Reset(s.tick)
 			}

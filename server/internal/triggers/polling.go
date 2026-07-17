@@ -27,6 +27,7 @@
 package triggers
 
 import (
+	"context"
 	"fmt"
 	"hash/fnv"
 	"sort"
@@ -36,6 +37,15 @@ import (
 
 	"github.com/CrossCraftAI/crosscraft-brain/server/internal/schema"
 )
+
+// PersistentStore is an optional interface for persisting poll state across
+// executions. When set on a Poller, the dedup set (SeenIDs), cursor, idle
+// count, and poll count survive execution boundaries so items are never
+// re-emitted on the next workflow run.
+type PersistentStore interface {
+	LoadPollState(ctx context.Context, scope string) (*pollState, error)
+	SavePollState(ctx context.Context, scope string, state *pollState) error
+}
 
 // ---------------------------------------------------------------------------
 // Core types
@@ -77,6 +87,7 @@ type Opts struct {
 type Poller struct {
 	opts  Opts
 	state *pollState // loaded from / persisted to ctx.State
+	store PersistentStore
 }
 
 // pollState is the serialisable polling state stored in ctx.State under a
@@ -96,9 +107,18 @@ type pollState struct {
 // DefaultMinInterval is the minimum allowed poll interval.
 const DefaultMinInterval = 10 * time.Second
 
+// PollerOption configures a Poller at construction time.
+type PollerOption func(*Poller)
+
+// WithPersistentStore sets the persistent store on the Poller so dedup state
+// survives across execution boundaries.
+func WithPersistentStore(store PersistentStore) PollerOption {
+	return func(p *Poller) { p.store = store }
+}
+
 // New creates a Poller bound to the given scope and ExecContext. The poller
 // reads its previous state from ctx.State and persists updates back.
-func New(ctx *schema.ExecContext, opts Opts) *Poller {
+func New(ctx *schema.ExecContext, opts Opts, pollerOpts ...PollerOption) *Poller {
 	if ctx.State == nil {
 		ctx.State = map[string]any{}
 	}
@@ -112,7 +132,18 @@ func New(ctx *schema.ExecContext, opts Opts) *Poller {
 		opts.MaxIdlePolls = 5
 	}
 	ps := loadState(ctx.State, opts.Scope)
-	return &Poller{opts: opts, state: ps}
+	p := &Poller{opts: opts, state: ps}
+	for _, o := range pollerOpts {
+		o(p)
+	}
+	// If a persistent store is configured, prefer its durable state over the
+	// execution-scoped state (which is fresh on every workflow run).
+	if p.store != nil {
+		if durable, err := p.store.LoadPollState(context.Background(), opts.Scope); err == nil && durable != nil {
+			p.state = durable
+		}
+	}
+	return p
 }
 
 // ---------------------------------------------------------------------------
@@ -158,7 +189,7 @@ func (p *Poller) effectiveInterval() time.Duration {
 func (p *Poller) markFired(ctx *schema.ExecContext) {
 	p.state.LastPoll = time.Now().Unix()
 	p.state.PollCount++
-	saveState(ctx.State, p.opts.Scope, p.state)
+	p.savePersistent(ctx)
 }
 
 // ---------------------------------------------------------------------------
@@ -187,7 +218,7 @@ func (p *Poller) Emit(ctx *schema.ExecContext, items []schema.Item, opts ...Emit
 		} else {
 			p.state.IdleCount++
 		}
-		saveState(ctx.State, p.opts.Scope, p.state)
+		p.savePersistent(ctx)
 		return items
 	}
 
@@ -222,7 +253,7 @@ func (p *Poller) Emit(ctx *schema.ExecContext, items []schema.Item, opts ...Emit
 	} else {
 		p.state.IdleCount++
 	}
-	saveState(ctx.State, p.opts.Scope, p.state)
+	p.savePersistent(ctx)
 	return out
 }
 
@@ -324,6 +355,15 @@ func WithIDFunc(fn IDExtractor) EmitOption {
 // WithCursor sets the position cursor (e.g. row count, history ID).
 func WithCursor(cursor string) EmitOption {
 	return func(c *emitConfig) { c.cursor = cursor }
+}
+
+// savePersistent writes state to both the execution-scoped ctx.State and the
+// optional persistent store, ensuring dedup state survives across executions.
+func (p *Poller) savePersistent(ctx *schema.ExecContext) {
+	saveState(ctx.State, p.opts.Scope, p.state)
+	if p.store != nil {
+		_ = p.store.SavePollState(context.Background(), p.opts.Scope, p.state)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -459,7 +499,7 @@ func (p *Poller) Stats() map[string]any {
 // will be re-emitted.
 func (p *Poller) Reset(ctx *schema.ExecContext) {
 	p.state = &pollState{}
-	saveState(ctx.State, p.opts.Scope, p.state)
+	p.savePersistent(ctx)
 }
 
 // ---------------------------------------------------------------------------

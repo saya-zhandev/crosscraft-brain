@@ -29,6 +29,9 @@ func getFormsService(ctx *schema.ExecContext, base string) (*forms.Service, erro
 		return nil, fmt.Errorf("forms: authorized client: %w", err)
 	}
 	credID, _ := ctx.Params["credential"].(string)
+	if credID == "" {
+		return nil, fmt.Errorf("forms: credential is required")
+	}
 	cacheKey := credID + "|" + base
 
 	formsSvcMu.Lock()

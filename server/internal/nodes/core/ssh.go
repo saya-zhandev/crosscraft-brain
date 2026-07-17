@@ -134,13 +134,16 @@ func sshExec(client *ssh.Client, command string) (schema.NodeResult, error) {
 }
 
 func sshListFiles(client *ssh.Client, path string) (schema.NodeResult, error) {
+	if !isValidSFTPPath(path) {
+		return schema.NodeResult{}, fmt.Errorf("ssh: invalid path: %q", path)
+	}
 	session, err := client.NewSession()
 	if err != nil {
 		return schema.NodeResult{}, fmt.Errorf("ssh list: session: %w", err)
 	}
 	defer session.Close()
 
-	out, err := session.Output("ls -la " + shellEscape(path))
+	out, err := session.Output("ls -la " + path)
 	if err != nil {
 		return schema.NodeResult{}, fmt.Errorf("ssh list: %w (output: %s)", err, string(out))
 	}
@@ -191,12 +194,15 @@ func sshUpload(ctx *schema.ExecContext, client *ssh.Client, remotePath, prop str
 	}
 	defer session.Close()
 
+	if !isValidSFTPPath(remotePath) {
+		return schema.NodeResult{}, fmt.Errorf("ssh: invalid path: %q", remotePath)
+	}
 	stdin, err := session.StdinPipe()
 	if err != nil {
 		return schema.NodeResult{}, fmt.Errorf("ssh upload: stdin: %w", err)
 	}
 
-	cmd := "cat > " + shellEscape(remotePath)
+	cmd := "cat > " + remotePath
 	if err := session.Start(cmd); err != nil {
 		return schema.NodeResult{}, fmt.Errorf("ssh upload: start: %w", err)
 	}
@@ -220,12 +226,15 @@ func sshDownload(client *ssh.Client, remotePath, outProp string) (schema.NodeRes
 	}
 	defer session.Close()
 
+	if !isValidSFTPPath(remotePath) {
+		return schema.NodeResult{}, fmt.Errorf("ssh: invalid path: %q", remotePath)
+	}
 	stdout, err := session.StdoutPipe()
 	if err != nil {
 		return schema.NodeResult{}, fmt.Errorf("ssh download: stdout: %w", err)
 	}
 
-	cmd := "cat " + shellEscape(remotePath)
+	cmd := "cat " + remotePath
 	if err := session.Start(cmd); err != nil {
 		return schema.NodeResult{}, fmt.Errorf("ssh download: start: %w", err)
 	}

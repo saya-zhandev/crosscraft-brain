@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"mime"
+	"mime/quotedprintable"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +30,9 @@ func getGmailService(ctx *schema.ExecContext, base string) (*gmail.Service, erro
 		return nil, fmt.Errorf("gmail: authorized client: %w", err)
 	}
 	credID, _ := ctx.Params["credential"].(string)
+	if credID == "" {
+		return nil, fmt.Errorf("gmail: credential is required")
+	}
 	cacheKey := credID + "|" + base
 
 	gmailSvcMu.Lock()
@@ -642,7 +646,10 @@ func buildMIMEMessage(ctx *schema.ExecContext, to, cc, bcc, subject, body, conte
 		fmt.Fprintf(&buf, "Content-Type: %s; charset=\"UTF-8\"\r\n", contentType)
 		fmt.Fprintf(&buf, "Content-Transfer-Encoding: quoted-printable\r\n")
 		fmt.Fprintf(&buf, "\r\n")
-		fmt.Fprintf(&buf, "%s", body)
+		qpWriter := quotedprintable.NewWriter(&buf)
+		qpWriter.Write([]byte(body))
+		qpWriter.Close()
+		fmt.Fprintf(&buf, "\r\n")
 	} else {
 		boundary := fmt.Sprintf("__CrossCraft_%x__", time.Now().UnixNano())
 		fmt.Fprintf(&buf, "Content-Type: multipart/mixed; boundary=\"%s\"\r\n", boundary)
@@ -652,7 +659,10 @@ func buildMIMEMessage(ctx *schema.ExecContext, to, cc, bcc, subject, body, conte
 		fmt.Fprintf(&buf, "Content-Type: %s; charset=\"UTF-8\"\r\n", contentType)
 		fmt.Fprintf(&buf, "Content-Transfer-Encoding: quoted-printable\r\n")
 		fmt.Fprintf(&buf, "\r\n")
-		fmt.Fprintf(&buf, "%s\r\n", body)
+		qpWriter := quotedprintable.NewWriter(&buf)
+		qpWriter.Write([]byte(body))
+		qpWriter.Close()
+		fmt.Fprintf(&buf, "\r\n")
 
 		if attsRaw, ok := attachments["attachments"].([]any); ok {
 			for _, a := range attsRaw {

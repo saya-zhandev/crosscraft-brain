@@ -13,3 +13,8 @@ apps/*/dist/
 # `go:embed dist` always compiles, even before a frontend build has run.
 server/web/dist/*
 !server/web/dist/.gitkeep
+
+# Go build artifacts — never commit binaries or editor backup binaries.
+*.exe
+server/crosscraft.exe
+server/crosscraft.exe~

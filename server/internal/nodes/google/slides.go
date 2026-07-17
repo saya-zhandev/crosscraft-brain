@@ -27,6 +27,9 @@ func getSlidesService(ctx *schema.ExecContext, base string) (*slides.Service, er
 		return nil, fmt.Errorf("slides: authorized client: %w", err)
 	}
 	credID, _ := ctx.Params["credential"].(string)
+	if credID == "" {
+		return nil, fmt.Errorf("slides: credential is required")
+	}
 	cacheKey := credID + "|" + base
 
 	slidesSvcMu.Lock()

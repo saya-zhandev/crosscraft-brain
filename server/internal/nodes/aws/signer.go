@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -39,6 +40,7 @@ func (s *Signer) Sign(req *http.Request, body []byte) error {
 
 	// Set required headers
 	req.Header.Set("X-Amz-Date", amzDate)
+	req.Header.Set("X-Amz-Content-Sha256", payloadHash)
 	req.Header.Set("Host", req.Host)
 	if req.Header.Get("Content-Type") == "" && len(body) > 0 {
 		req.Header.Set("Content-Type", "application/octet-stream")
@@ -95,6 +97,45 @@ func (s *Signer) SignRequest(req *http.Request) error {
 		req.Body = io.NopCloser(bytes.NewReader(body))
 	}
 	return s.Sign(req, body)
+}
+
+// PresignURL generates a presigned URL valid for the specified duration.
+func (s *Signer) PresignURL(u *url.URL, duration time.Duration) (string, error) {
+	t := time.Now().UTC()
+	credentialScope := t.Format("20060102") + "/" + s.Region + "/" + s.Service + "/aws4_request"
+
+	query := u.Query()
+	query.Set("X-Amz-Algorithm", "AWS4-HMAC-SHA256")
+	query.Set("X-Amz-Credential", s.AccessKey+"/"+credentialScope)
+	query.Set("X-Amz-Date", t.Format("20060102T150405Z"))
+	query.Set("X-Amz-Expires", fmt.Sprintf("%d", int(duration.Seconds())))
+	query.Set("X-Amz-SignedHeaders", "host")
+
+	u.RawQuery = query.Encode()
+
+	// Build string to sign
+	canonicalReq := strings.Join([]string{
+		"GET",
+		canonicalURI(u.Path),
+		canonicalQuery(u.RawQuery),
+		"host:" + u.Host + "\n",
+		"host",
+		"UNSIGNED-PAYLOAD",
+	}, "\n")
+
+	stringToSign := strings.Join([]string{
+		"AWS4-HMAC-SHA256",
+		t.Format("20060102T150405Z"),
+		credentialScope,
+		sha256Hex([]byte(canonicalReq)),
+	}, "\n")
+
+	signingKey := s.deriveSigningKey(t.Format("20060102"))
+	signature := hex.EncodeToString(hmacSHA256(signingKey, []byte(stringToSign)))
+
+	query.Set("X-Amz-Signature", signature)
+	u.RawQuery = query.Encode()
+	return u.String(), nil
 }
 
 // SigningRoundTripper wraps an http.RoundTripper and signs AWS requests.
@@ -159,23 +200,17 @@ func canonicalURI(path string) string {
 	return "/" + strings.Join(encoded, "/")
 }
 
+// canonicalQuery sorts query parameters in canonical order per AWS SigV4 spec.
+// The caller must provide already-URL-encoded query values — Go's net/url.Values.Encode
+// produces properly encoded output. This function does NOT re-encode; it only sorts
+// and joins, since the values are expected to be properly encoded already.
 func canonicalQuery(query string) string {
 	if query == "" {
 		return ""
 	}
 	parts := strings.Split(query, "&")
 	sort.Strings(parts)
-	encoded := make([]string, 0, len(parts))
-	for _, p := range parts {
-		kv := strings.SplitN(p, "=", 2)
-		key := urlEncode(kv[0])
-		val := ""
-		if len(kv) > 1 {
-			val = urlEncode(kv[1])
-		}
-		encoded = append(encoded, key+"="+val)
-	}
-	return strings.Join(encoded, "&")
+	return strings.Join(parts, "&")
 }
 
 func canonicalHeadersAndSigned(req *http.Request) (string, string) {

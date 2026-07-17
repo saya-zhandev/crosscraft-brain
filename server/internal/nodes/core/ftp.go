@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/textproto"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -229,10 +230,10 @@ func handleFTP(ctx *schema.ExecContext, action, host string, port int, user, pas
 	}
 
 	// Login
-	if _, err := sendCmd("USER "+user, "331"); err != nil {
+	if _, err := sendCmd("USER "+sanitizeFTPArg(user), "331"); err != nil {
 		return schema.NodeResult{}, err
 	}
-	if _, err := sendCmd("PASS "+password, "230"); err != nil {
+	if _, err := sendCmd("PASS "+sanitizeFTPArg(password), "230"); err != nil {
 		return schema.NodeResult{}, fmt.Errorf("ftp: login failed: %w", err)
 	}
 
@@ -245,7 +246,7 @@ func handleFTP(ctx *schema.ExecContext, action, host string, port int, user, pas
 		}
 		defer dataConn.Close()
 
-		if _, err := sendCmd("LIST "+remotePath, "150"); err != nil {
+		if _, err := sendCmd("LIST "+sanitizeFTPArg(remotePath), "150"); err != nil {
 			return schema.NodeResult{}, err
 		}
 		// Read directory listing
@@ -287,7 +288,7 @@ func handleFTP(ctx *schema.ExecContext, action, host string, port int, user, pas
 		}
 		defer dataConn.Close()
 
-		if _, err := sendCmd("STOR "+dstName, "150"); err != nil {
+		if _, err := sendCmd("STOR "+sanitizeFTPArg(dstName), "150"); err != nil {
 			return schema.NodeResult{}, err
 		}
 		dataConn.Write(data)
@@ -304,7 +305,7 @@ func handleFTP(ctx *schema.ExecContext, action, host string, port int, user, pas
 		}
 		defer dataConn.Close()
 
-		if _, err := sendCmd("RETR "+remotePath, "150"); err != nil {
+		if _, err := sendCmd("RETR "+sanitizeFTPArg(remotePath), "150"); err != nil {
 			return schema.NodeResult{}, err
 		}
 		var buf bytes.Buffer
@@ -323,7 +324,7 @@ func handleFTP(ctx *schema.ExecContext, action, host string, port int, user, pas
 		}}}}, nil
 
 	case "delete":
-		if _, err := sendCmd("DELE "+remotePath, "250"); err != nil {
+		if _, err := sendCmd("DELE "+sanitizeFTPArg(remotePath), "250"); err != nil {
 			return schema.NodeResult{}, fmt.Errorf("ftp delete: %w", err)
 		}
 		return schema.NodeResult{Outputs: map[string][]schema.Item{"main": {{JSON: map[string]any{
@@ -416,13 +417,16 @@ func newSFTPClient(sshClient *ssh.Client) (*sftpWrapper, error) {
 }
 
 func (s *sftpWrapper) ReadDir(path string) ([]osFileInfo, error) {
+	if !isValidSFTPPath(path) {
+		return nil, fmt.Errorf("sftp: invalid path: %q", path)
+	}
 	session, err := s.client.NewSession()
 	if err != nil {
 		return nil, err
 	}
 	defer session.Close()
 
-	cmd := "ls -la " + shellEscape(path)
+	cmd := "ls -la " + path
 	out, err := session.Output(cmd)
 	if err != nil {
 		return nil, fmt.Errorf("sftp ls: %w (output: %s)", err, string(out))
@@ -440,11 +444,14 @@ func (s *sftpWrapper) ReadDir(path string) ([]osFileInfo, error) {
 }
 
 func (s *sftpWrapper) Open(path string) (io.ReadCloser, error) {
+	if !isValidSFTPPath(path) {
+		return nil, fmt.Errorf("sftp: invalid path: %q", path)
+	}
 	session, err := s.client.NewSession()
 	if err != nil {
 		return nil, err
 	}
-	cmd := "cat " + shellEscape(path)
+	cmd := "cat " + path
 	stdout, err := session.StdoutPipe()
 	if err != nil {
 		session.Close()
@@ -458,6 +465,9 @@ func (s *sftpWrapper) Open(path string) (io.ReadCloser, error) {
 }
 
 func (s *sftpWrapper) Create(path string) (io.WriteCloser, error) {
+	if !isValidSFTPPath(path) {
+		return nil, fmt.Errorf("sftp: invalid path: %q", path)
+	}
 	session, err := s.client.NewSession()
 	if err != nil {
 		return nil, err
@@ -467,7 +477,7 @@ func (s *sftpWrapper) Create(path string) (io.WriteCloser, error) {
 		session.Close()
 		return nil, err
 	}
-	cmd := "cat > " + shellEscape(path)
+	cmd := "cat > " + path
 	if err := session.Start(cmd); err != nil {
 		session.Close()
 		return nil, err
@@ -476,21 +486,27 @@ func (s *sftpWrapper) Create(path string) (io.WriteCloser, error) {
 }
 
 func (s *sftpWrapper) Remove(path string) error {
+	if !isValidSFTPPath(path) {
+		return fmt.Errorf("sftp: invalid path: %q", path)
+	}
 	session, err := s.client.NewSession()
 	if err != nil {
 		return err
 	}
 	defer session.Close()
-	return session.Run("rm " + shellEscape(path))
+	return session.Run("rm " + path)
 }
 
 func (s *sftpWrapper) RemoveAll(path string) error {
+	if !isValidSFTPPath(path) {
+		return fmt.Errorf("sftp: invalid path: %q", path)
+	}
 	session, err := s.client.NewSession()
 	if err != nil {
 		return err
 	}
 	defer session.Close()
-	return session.Run("rm -rf " + shellEscape(path))
+	return session.Run("rm -rf " + path)
 }
 
 func (s *sftpWrapper) Close() error {
@@ -516,6 +532,21 @@ func (w *sftpWriteCloser) Close() error {
 	return w.session.Wait()
 }
 
+var safePathRE = regexp.MustCompile(`^[a-zA-Z0-9_./\-]+$`)
+
+func isValidSFTPPath(path string) bool {
+	return len(path) > 0 && len(path) < 4096 && safePathRE.MatchString(path) && !strings.Contains(path, "..")
+}
+
+// shellEscape quotes a path for use in a shell command via single-quote escaping.
+// Prefer isValidSFTPPath validation over shell commands; this is retained for the
+// ssh.go node which executes commands over SSH sessions.
 func shellEscape(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+func sanitizeFTPArg(s string) string {
+	s = strings.ReplaceAll(s, "\r", "")
+	s = strings.ReplaceAll(s, "\n", "")
+	return s
 }

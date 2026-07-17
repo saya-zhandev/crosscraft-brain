@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "deepseek/deepseek-chat",
+  "provider": {
+    "deepseek": {
+      "base_url": "https://api.deepseek.com/anthropic",
+      "api_key": "{env:AI_API_KEY}"
+    }
+  }
+}

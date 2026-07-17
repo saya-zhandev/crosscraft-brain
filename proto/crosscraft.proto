@@ -1,0 +1,86 @@
+syntax = "proto3";
+package crosscraft.mobile;
+option go_package = "github.com/CrossCraftAI/crosscraft-brain/server/internal/mobile/gen";
+option swift_prefix = "CC";
+option java_package = "io.crosscraft.mobile";
+
+service CrossCraftMobile {
+  rpc TriggerWorkflow(TriggerRequest) returns (TriggerResponse);
+  rpc ResumeExecution(ResumeRequest) returns (ResumeResponse);
+  rpc StreamExecution(StreamRequest) returns (stream ExecutionEvent);
+  rpc GetExecution(GetExecutionRequest) returns (GetExecutionResponse);
+  rpc RegisterDevice(RegisterDeviceRequest) returns (RegisterDeviceResponse);
+  rpc ListWorkflows(ListWorkflowsRequest) returns (ListWorkflowsResponse);
+}
+
+message TriggerRequest {
+  string webhook_path = 1;
+  string api_key = 2;
+  map<string, string> params = 3;
+  bytes attachment = 4;
+}
+
+message TriggerResponse {
+  string execution_id = 1;
+  string status = 2;
+  string respond_body = 3;
+  int32 respond_status = 4;
+}
+
+message StreamRequest {
+  string execution_id = 1;
+  string api_key = 2;
+}
+
+message ExecutionEvent {
+  string execution_id = 1;
+  string status = 2;
+  repeated StepEvent steps = 3;
+}
+
+message StepEvent {
+  string node_id = 1;
+  string status = 2;
+  string output_json = 3;
+}
+
+message ResumeRequest {
+  string execution_id = 1;
+  string api_key = 2;
+  string payload_json = 3;
+}
+
+message ResumeResponse {
+  string execution_id = 1;
+  string status = 2;
+  string outputs_json = 3;
+}
+
+message GetExecutionRequest {
+  string execution_id = 1;
+  string api_key = 2;
+}
+
+message GetExecutionResponse {
+  string execution_id = 1;
+  string status = 2;
+  string steps_json = 3;
+}
+
+message RegisterDeviceRequest {
+  string api_key = 1;
+  string device_token = 2;
+  string platform = 3;
+}
+
+message RegisterDeviceResponse {
+  bool ok = 1;
+}
+
+message ListWorkflowsRequest {
+  string api_key = 1;
+}
+
+message ListWorkflowsResponse {
+  string workflows_json = 1;
+}

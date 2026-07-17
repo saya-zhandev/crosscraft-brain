@@ -159,7 +159,7 @@ type LoadOptionsFunc func(ctx context.Context, param string, query string, crede
 type NodeDefinition struct {
 	Type        string
 	Label       string
-	Group       string // trigger|transform|flow|integration|ai
+	Group       string // trigger|transform|flow|integration|ai|storage
 	Icon        string
 	Description string
 	Inputs      []Port

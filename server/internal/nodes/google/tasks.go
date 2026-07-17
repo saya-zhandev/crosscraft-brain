@@ -27,6 +27,9 @@ func getTasksService(ctx *schema.ExecContext, base string) (*tasks.Service, erro
 		return nil, fmt.Errorf("tasks: authorized client: %w", err)
 	}
 	credID, _ := ctx.Params["credential"].(string)
+	if credID == "" {
+		return nil, fmt.Errorf("tasks: credential is required")
+	}
 	cacheKey := credID + "|" + base
 
 	tasksSvcMu.Lock()

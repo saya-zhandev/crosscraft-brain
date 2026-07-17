@@ -7,6 +7,8 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -69,13 +71,17 @@ func NewDiskBinaryStore(rootDir string) (*DiskBinaryStore, error) {
 // Put writes the reader to a file under rootDir/key. The key is returned
 // unchanged. If size is known (>0), disk space is pre-allocated.
 func (s *DiskBinaryStore) Put(_ context.Context, key string, reader io.Reader, _ int64) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	fullPath := s.safePath(key)
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
 		return "", fmt.Errorf("binary store put: mkdir: %w", err)
 	}
 
-	// Write to a temp file first, then atomically rename — avoids partial reads.
-	tmpPath := fullPath + ".tmp"
+	// Use a unique temp file per write to prevent concurrent uploads from
+	// targeting the same key from corrupting each other.
+	tmpPath := fullPath + ".tmp." + randString(12)
 	f, err := os.Create(tmpPath)
 	if err != nil {
 		return "", fmt.Errorf("binary store put: create: %w", err)
@@ -101,6 +107,9 @@ func (s *DiskBinaryStore) Put(_ context.Context, key string, reader io.Reader, _
 
 // Get opens the file at key for reading. The caller must close the returned reader.
 func (s *DiskBinaryStore) Get(_ context.Context, key string) (io.ReadCloser, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	fullPath := s.safePath(key)
 	f, err := os.Open(fullPath)
 	if err != nil {
@@ -114,6 +123,9 @@ func (s *DiskBinaryStore) Get(_ context.Context, key string) (io.ReadCloser, err
 
 // Delete removes the file at key. Missing files are not an error.
 func (s *DiskBinaryStore) Delete(_ context.Context, key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	fullPath := s.safePath(key)
 	if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("binary store delete: %w", err)
@@ -123,6 +135,9 @@ func (s *DiskBinaryStore) Delete(_ context.Context, key string) error {
 
 // GetURL returns a file:// URL for the stored blob.
 func (s *DiskBinaryStore) GetURL(_ context.Context, key string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	fullPath := s.safePath(key)
 	if _, err := os.Stat(fullPath); err != nil {
 		if os.IsNotExist(err) {
@@ -139,6 +154,9 @@ func (s *DiskBinaryStore) GetURL(_ context.Context, key string) (string, error) 
 
 // Exists checks whether the blob at key exists on disk.
 func (s *DiskBinaryStore) Exists(_ context.Context, key string) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	fullPath := s.safePath(key)
 	_, err := os.Stat(fullPath)
 	if err == nil {
@@ -153,6 +171,9 @@ func (s *DiskBinaryStore) Exists(_ context.Context, key string) (bool, error) {
 // Cleanup removes the directory tree rooted at the given prefix under rootDir.
 // It does not return an error if the prefix doesn't exist.
 func (s *DiskBinaryStore) Cleanup(_ context.Context, prefix string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	fullPath := s.safePath(prefix)
 	// Only clean up subdirectories of rootDir (safety guard).
 	if !strings.HasPrefix(filepath.Clean(fullPath), filepath.Clean(s.rootDir)+string(os.PathSeparator)) &&
@@ -174,6 +195,13 @@ func (s *DiskBinaryStore) safePath(key string) string {
 		cleaned = filepath.Join(s.rootDir, "_unsafe_", filepath.Base(filepath.FromSlash(key)))
 	}
 	return cleaned
+}
+
+// randString generates a cryptographically random hex string of length n.
+func randString(n int) string {
+	b := make([]byte, n/2+1)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)[:n]
 }
 
 // ---------------------------------------------------------------------------

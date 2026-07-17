@@ -23,19 +23,31 @@ type retryTransport struct {
 }
 
 func (rt *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Non-idempotent methods (POST, PATCH, etc.) get at most one retry and
+	// only on server-side or rate-limit errors. Idempotent methods (GET, HEAD,
+	// OPTIONS, PUT, DELETE) get up to 3 retries with exponential backoff.
+	maxRetries := 3
+	if req.Method != "GET" && req.Method != "HEAD" && req.Method != "OPTIONS" && req.Method != "PUT" && req.Method != "DELETE" {
+		maxRetries = 1
+	}
+
 	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
+	for attempt := 0; attempt < maxRetries; attempt++ {
 		res, err := rt.base.RoundTrip(req)
 		if err != nil {
 			lastErr = err
-			time.Sleep(backoffDuration(attempt, ""))
+			if attempt < maxRetries-1 {
+				time.Sleep(backoffDuration(attempt, ""))
+			}
 			continue
 		}
 		if res.StatusCode == http.StatusTooManyRequests || res.StatusCode >= 500 {
 			wait := backoffDuration(attempt, res.Header.Get("Retry-After"))
 			res.Body.Close()
 			lastErr = fmt.Errorf("status %d", res.StatusCode)
-			time.Sleep(wait)
+			if attempt < maxRetries-1 {
+				time.Sleep(wait)
+			}
 			continue
 		}
 		return res, nil

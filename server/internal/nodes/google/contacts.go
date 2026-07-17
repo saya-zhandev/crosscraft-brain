@@ -27,6 +27,9 @@ func getPeopleService(ctx *schema.ExecContext, base string) (*people.Service, er
 		return nil, fmt.Errorf("contacts: authorized client: %w", err)
 	}
 	credID, _ := ctx.Params["credential"].(string)
+	if credID == "" {
+		return nil, fmt.Errorf("contacts: credential is required")
+	}
 	cacheKey := credID + "|" + base
 
 	peopleSvcMu.Lock()

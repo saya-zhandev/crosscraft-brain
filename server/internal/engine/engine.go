@@ -290,7 +290,7 @@ func (e *Engine) drive(ctx context.Context, wf *schema.Workflow, executionID str
 		def, ok := e.reg.Get(node.Type)
 		if !ok {
 			msg := "unknown node type: " + node.Type
-			_ = e.store.FinishExecution(ctx, executionID, "error")
+			_ = e.store.FinishExecution(context.Background(), executionID, "error")
 			return RunResult{ExecutionID: executionID, Status: "error", Error: msg}, nil
 		}
 
@@ -321,7 +321,7 @@ func (e *Engine) drive(ctx context.Context, wf *schema.Workflow, executionID str
 		if execErr != nil {
 			msg := execErr.Error()
 			_ = e.store.FinishStep(ctx, stepID, "error", nil, logs, &msg)
-			_ = e.store.FinishExecution(ctx, executionID, "error")
+			_ = e.store.FinishExecution(context.Background(), executionID, "error")
 			return RunResult{ExecutionID: executionID, Status: "error", Error: msg}, nil
 		}
 
@@ -348,7 +348,7 @@ func (e *Engine) drive(ctx context.Context, wf *schema.Workflow, executionID str
 		ready = enqueueReadySuccessors(wf, nodeID, visited, ready)
 	}
 
-	if err := e.store.FinishExecution(ctx, executionID, "success"); err != nil {
+	if err := e.store.FinishExecution(context.Background(), executionID, "success"); err != nil {
 		return RunResult{}, err
 	}
 	return RunResult{ExecutionID: executionID, Status: "success", Outputs: terminalOutputs(wf, state)}, nil
@@ -382,7 +382,11 @@ func (e *Engine) Run(ctx context.Context, wf *schema.Workflow, triggerItems []sc
 	if err := e.store.SaveState(ctx, executionID, state); err != nil {
 		return RunResult{}, err
 	}
-	e.enqueue(executionID)
+	if err := e.TryEnqueue(executionID); err != nil {
+		// Queue full — fail the execution gracefully instead of blocking.
+		_ = e.store.FinishExecution(context.Background(), executionID, "error")
+		return RunResult{}, fmt.Errorf("engine: queue full, try again later")
+	}
 	return RunResult{ExecutionID: executionID, Status: "running"}, nil
 }
 
@@ -437,7 +441,9 @@ func (e *Engine) Resume(ctx context.Context, executionID string, payload []schem
 		ready := enqueueReadySuccessors(wf, waitingNodeID, visited, []string{})
 		return e.drive(ctx, wf, executionID, state, ready)
 	}
-	e.enqueue(executionID)
+	if err := e.TryEnqueue(executionID); err != nil {
+		return RunResult{}, fmt.Errorf("engine: queue full, try again later")
+	}
 	return RunResult{ExecutionID: executionID, Status: "running"}, nil
 }
 
@@ -543,7 +549,7 @@ func (e *Engine) process(ctx context.Context, executionID string) {
 		if r := recover(); r != nil {
 			log.Printf("ENGINE PANIC: execution %s: %v\n%s", executionID, r, debug.Stack())
 			// Mark the execution as error so it doesn't stay 'running' forever.
-			_ = e.store.FinishExecution(ctx, executionID, "error")
+			_ = e.store.FinishExecution(context.Background(), executionID, "error")
 		}
 	}()
 
@@ -553,7 +559,7 @@ func (e *Engine) process(ctx context.Context, executionID string) {
 	}
 	wf, err := e.store.LoadWorkflow(ctx, exec.WorkflowID)
 	if err != nil || wf == nil {
-		_ = e.store.FinishExecution(ctx, executionID, "error")
+		_ = e.store.FinishExecution(context.Background(), executionID, "error")
 		return
 	}
 
@@ -577,7 +583,7 @@ func (e *Engine) process(ctx context.Context, executionID string) {
 	if len(visited) == 0 {
 		trigger, err := e.findTrigger(wf)
 		if err != nil {
-			_ = e.store.FinishExecution(ctx, executionID, "error")
+			_ = e.store.FinishExecution(context.Background(), executionID, "error")
 			return
 		}
 		ready = []string{trigger.ID}
@@ -630,18 +636,19 @@ func (e *Engine) recoverRunning(ctx context.Context) {
 	}
 }
 
-// Shutdown gracefully drains the worker pool. It closes the job channel (so no
-// new work is accepted), waits for all in-flight process() calls to finish, then
-// returns. Callers MUST cancel the context passed to StartWorkers before calling
-// Shutdown so workers exit their select loop.
+// Shutdown prevents new work from being accepted and signals that the engine is
+// stopping. It does NOT close e.jobs — workers exit via ctx cancellation in their
+// select loop, and closing the channel would panic if a concurrent Run/Resume
+// caller is still sending. The channel is garbage collected after all goroutines
+// drain. Callers MUST cancel the context passed to StartWorkers before calling
+// Shutdown.
 func (e *Engine) Shutdown() {
 	if !e.async {
 		return
 	}
-	// Close the jobs channel so workers drain and exit after ctx cancellation.
-	// Only the sender should close; recoverRunning and all Run/Resume callers
-	// are the senders — they stop after ctx is cancelled.
-	close(e.jobs)
+	// Workers exit when ctx is cancelled (they select on <-ctx.Done()).
+	// Do NOT close e.jobs — in-flight Run/Resume callers may still be sending.
+	// The channel will be garbage collected after all goroutines drain.
 }
 
 // WaitDrain waits for all worker goroutines to exit. The context passed to

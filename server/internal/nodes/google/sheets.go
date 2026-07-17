@@ -32,6 +32,9 @@ func getSheetsService(ctx *schema.ExecContext, base string) (*sheets.Service, er
 		return nil, fmt.Errorf("google sheets: authorized client: %w", err)
 	}
 	credID, _ := ctx.Params["credential"].(string)
+	if credID == "" {
+		return nil, fmt.Errorf("google sheets: credential is required")
+	}
 	cacheKey := credID + "|" + base
 
 	// Fast path: read under lock.

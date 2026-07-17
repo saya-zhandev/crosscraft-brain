@@ -28,6 +28,9 @@ func getDocsService(ctx *schema.ExecContext, base string) (*docs.Service, error)
 		return nil, fmt.Errorf("docs: authorized client: %w", err)
 	}
 	credID, _ := ctx.Params["credential"].(string)
+	if credID == "" {
+		return nil, fmt.Errorf("docs: credential is required")
+	}
 	cacheKey := credID + "|" + base
 
 	docsSvcMu.Lock()

@@ -28,7 +28,7 @@ func BlobStorage(base string) rest.Node {
 		BaseURL:      base,
 		BaseURLParam: "baseUrl",
 		CredType:     "azureStorage",
-		Auth:         rest.Auth{Kind: "none"}, // Shared Key auth handled via custom Execute
+		Auth: rest.Auth{Kind: "none"}, // Shared Key auth must be wired via NewSignedTransport; see AzureSignRequest
 		Ops: []rest.Op{
 			{Resource: "container", Name: "list", Label: "List Containers", Method: "GET",
 				Path: "/?comp=list", ItemsPath: "Containers.Container",
@@ -61,8 +61,34 @@ func BlobStorage(base string) rest.Node {
 	}
 }
 
-// azureSignRequest signs an HTTP request with Azure Storage Shared Key.
-func azureSignRequest(req *http.Request, accountName, accountKey string) error {
+// NewSignedTransport wraps an http.RoundTripper with Azure Shared Key signing.
+func NewSignedTransport(accountName, accountKey string, base http.RoundTripper) http.RoundTripper {
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return &azureSigningTransport{
+		accountName: accountName,
+		accountKey:  accountKey,
+		base:        base,
+	}
+}
+
+type azureSigningTransport struct {
+	accountName string
+	accountKey  string
+	base        http.RoundTripper
+}
+
+func (t *azureSigningTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req2 := req.Clone(req.Context())
+	if err := AzureSignRequest(req2, t.accountName, t.accountKey); err != nil {
+		return nil, err
+	}
+	return t.base.RoundTrip(req2)
+}
+
+// AzureSignRequest signs an HTTP request with Azure Storage Shared Key.
+func AzureSignRequest(req *http.Request, accountName, accountKey string) error {
 	key, err := base64.StdEncoding.DecodeString(accountKey)
 	if err != nil {
 		return fmt.Errorf("azure storage: decode account key: %w", err)

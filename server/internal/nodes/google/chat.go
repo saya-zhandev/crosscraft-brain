@@ -26,6 +26,9 @@ func getChatService(ctx *schema.ExecContext, base string) (*chat.Service, error)
 		return nil, fmt.Errorf("chat: authorized client: %w", err)
 	}
 	credID, _ := ctx.Params["credential"].(string)
+	if credID == "" {
+		return nil, fmt.Errorf("chat: credential is required")
+	}
 	cacheKey := credID + "|" + base
 
 	chatSvcMu.Lock()

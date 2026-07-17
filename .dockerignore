@@ -11,5 +11,6 @@
 # local Go dev binary (the image builds its own)
 server/crosscraft
 server/crosscraft.exe
+server/crosscraft.exe~
 Dockerfile
 .dockerignore

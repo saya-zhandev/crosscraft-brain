@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sync"
 	"time"
 
@@ -271,12 +272,27 @@ func mysqlExec(ctx context.Context, db *sql.DB, execCtx *schema.ExecContext) (sc
 	return schema.NodeResult{Outputs: map[string][]schema.Item{"main": out}}, nil
 }
 
+// isValidMySQLIdentifier validates a MySQL identifier (table name, column name, procedure name)
+// against allowed characters, max 64 chars.
+func isValidMySQLIdentifier(name string) bool {
+	if name == "" || len(name) > 64 {
+		return false
+	}
+	re := regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
+	return re.MatchString(name)
+}
+
 func mysqlStoredProc(ctx context.Context, db *sql.DB, execCtx *schema.ExecContext) (schema.NodeResult, error) {
 	procedure, _ := execCtx.Params["procedure"].(string)
 	if procedure == "" {
 		return schema.NodeResult{}, fmt.Errorf("mysql: procedure name is required")
 	}
 	params := parseParams(execCtx.RawParam("params"))
+
+	// Validate procedure name to prevent SQL injection
+	if !isValidMySQLIdentifier(procedure) {
+		return schema.NodeResult{}, fmt.Errorf("mysql: invalid procedure name %q", procedure)
+	}
 
 	// Build CALL statement with parameter placeholders
 	placeholders := ""
@@ -288,7 +304,7 @@ func mysqlStoredProc(ctx context.Context, db *sql.DB, execCtx *schema.ExecContex
 			placeholders += "?"
 		}
 	}
-	callSQL := fmt.Sprintf("CALL %s(%s)", procedure, placeholders)
+	callSQL := fmt.Sprintf("CALL `%s`(%s)", procedure, placeholders)
 
 	rows, err := db.QueryContext(ctx, callSQL, params...)
 	if err != nil {
@@ -320,12 +336,20 @@ func mysqlTriggerNewRow(ctx context.Context, db *sql.DB, execCtx *schema.ExecCon
 		idColumn = "id"
 	}
 
-	lastID, _ := execCtx.State["lastId"].(string)
-	query := fmt.Sprintf("SELECT * FROM %s", table)
-	if lastID != "" {
-		query += fmt.Sprintf(" WHERE %s > ?", idColumn)
+	// Validate identifiers to prevent SQL injection
+	if !isValidMySQLIdentifier(table) {
+		return schema.NodeResult{}, fmt.Errorf("mysql trigger: invalid table name %q", table)
 	}
-	query += fmt.Sprintf(" ORDER BY %s ASC LIMIT 1", idColumn)
+	if !isValidMySQLIdentifier(idColumn) {
+		return schema.NodeResult{}, fmt.Errorf("mysql trigger: invalid idColumn name %q", idColumn)
+	}
+
+	lastID, _ := execCtx.State["lastId"].(string)
+	query := fmt.Sprintf("SELECT * FROM `%s`", table)
+	if lastID != "" {
+		query += fmt.Sprintf(" WHERE `%s` > ?", idColumn)
+	}
+	query += fmt.Sprintf(" ORDER BY `%s` ASC LIMIT 1", idColumn)
 
 	var args []any
 	if lastID != "" {

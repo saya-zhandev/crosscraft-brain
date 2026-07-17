@@ -27,6 +27,9 @@ func getCalendarService(ctx *schema.ExecContext, base string) (*calendar.Service
 		return nil, fmt.Errorf("calendar: authorized client: %w", err)
 	}
 	credID, _ := ctx.Params["credential"].(string)
+	if credID == "" {
+		return nil, fmt.Errorf("calendar: credential is required")
+	}
 	cacheKey := credID + "|" + base
 
 	calSvcMu.Lock()
